@@ -1,0 +1,14 @@
+# Never commit raw captures that may hold secrets or personal data
+*.har
+*.har.json
+.env
+.env.*
+*.pem
+*.key
+reference/recordings/**/*.wav
+reference/recordings/**/*.mp3
+reference/recordings/**/*.m4a
+!reference/recordings/.gitkeep
+node_modules/
+__pycache__/
+.DS_Store
