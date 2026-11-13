@@ -55,3 +55,8 @@ Product inventory, feature specs, user journeys, UI component inventory, API
 contracts, audio architecture, event/state models, database model proposals,
 security analysis, integration specs, test specs, implementation roadmap.
 See `INVESTIGATION_MASTER_PLAN.md` for module breakdown and status.
+
+## NEXORA platform
+NEXORA platform code and docs live in `platform/`. Its own rules are in
+`platform/CLAUDE.md`. Project skills for Claude Code are in `.claude/skills/`
+(sources and licences in `.claude/SKILLS.md`).

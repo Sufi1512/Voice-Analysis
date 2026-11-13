@@ -290,12 +290,12 @@ Observability, Developer, Administration).
 Separate PostgreSQL databases per owner: `nexora_core`, `dograh`, `dify` (dedicated only).
 
 ## 12. Repository layout
-A new monorepo `nexora-platform` for NEXORA-owned code (layout from plan §9).
-`Voice-Analysis` stays the research and audio repo. Engines are referenced by pinned
+NEXORA-owned code lives in the `platform/` folder of `Sufi1512/Voice-Analysis`, next to
+the research and audio work (layout from plan §9). It can move to its own repo later without changes. Engines are referenced by pinned
 image tags built from the forks `Sufi1512/dograh` and `Sufi1512/dify`, not vendored.
 
 ```
-nexora-platform/
+platform/
   apps/web            Portal
   apps/docs           Developer portal
   services/core       nexora-core (modules in §3)
@@ -305,7 +305,7 @@ nexora-platform/
   sdks/python, sdks/typescript
   engines/            Pinned versions, compose/helm overlays, nexora-audio Dograh patch
   infrastructure/     docker, k8s/helm, monitoring
-  docs/               These architecture docs move here
+  docs/               These architecture docs and the engine audits
 ```
 
 ## 13. Open decisions
@@ -315,4 +315,4 @@ nexora-platform/
 | D2 | Verify `dify-sandbox` licence | Use NEXORA's own sandboxed code runner |
 | D3 | Shared Dograh pool versus Dograh per tier for large customers | Shared pool, dedicated pool for enterprise plans |
 | D4 | Secrets back end (Vault versus cloud KMS) | Envelope encryption with a KMS-style interface. Local key in dev |
-| D5 | Monorepo name and location | `Sufi1512/nexora-platform` |
+| D5 | Code location | `platform/` in `Sufi1512/Voice-Analysis` (decided 2026-11-13) |

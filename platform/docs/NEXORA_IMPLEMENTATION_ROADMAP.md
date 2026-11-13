@@ -34,7 +34,7 @@ deploys it and monitors everything without knowing which engine runs what.*
 ## Phase P0: repository and foundations
 | # | Ticket | Size | Acceptance criteria |
 |---|---|---|---|
-| P0.1 | Create `nexora-platform` monorepo (layout from Architecture §12), pnpm + uv workspaces, pre-commit, CI (lint, type-check, tests) | M | `make dev` starts everything; CI green on an empty feature |
+| P0.1 | Set up the `platform/` monorepo in Voice-Analysis (layout from Architecture §12), pnpm + uv workspaces, pre-commit, CI (lint, type-check, tests) | M | `make dev` starts everything; CI green on an empty feature |
 | P0.2 | Docker Compose dev stack: PostgreSQL 17 + pgvector, Redis, MinIO, pinned Dograh (`api`, `coturn`), plugin daemon, `nexora-core`, `nexora-ai-runtime`, `portal`. Dify behind a `dedicated` profile | M | One command boots the stack. Healthchecks pass. Dograh telemetry is off |
 | P0.3 | `nexora-core` skeleton: FastAPI app, settings, async SQLAlchemy, Alembic, structured JSON logs, OTel, `/healthz` `/readyz` `/metrics` | M | Health endpoints work; a trace from a request appears in the local collector |
 | P0.4 | Portal skeleton: Next.js 15, Tailwind, shadcn/ui, NEXORA design tokens (dark-first), app shell with the navigation from plan §11, generated API client | M | Shell renders with empty pages for every nav item; Lighthouse accessibility ≥ 90 |

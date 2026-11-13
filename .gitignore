@@ -12,3 +12,8 @@ reference/recordings/**/*.m4a
 node_modules/
 __pycache__/
 .DS_Store
+
+# planning-with-files working files
+task_plan.md
+findings.md
+progress.md
