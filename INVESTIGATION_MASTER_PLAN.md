@@ -11,10 +11,10 @@ Confidence legend: see `CLAUDE.md`.
 
 | # | Module | Priority | Folder | Depends on | Status |
 |---|---|---|---|---|---|
-| 1 | Public website | P2 (run first — feeds inventory) | 00-product-discovery | — | NOT_STARTED |
+| 1 | Public website | P2 (run first — feeds inventory) | 00-product-discovery | — | IN_PROGRESS |
 | 2 | AI Meeting Assistant | P1 | 01-meeting-assistant | 1, 9 | NOT_STARTED |
 | 3 | Call Center AI | P1 | 02-call-center | 1, 5 | NOT_STARTED |
-| 4 | Developer Platform | P0 | 03-developer-platform | 1 | NOT_STARTED |
+| 4 | Developer Platform | P0 | 03-developer-platform | 1 | IN_PROGRESS |
 | 5 | Real-time Audio Engine | P0 | 04-audio-engine | 4 | NOT_STARTED |
 | 6 | Admin & Workspace | P1 | 05-admin | 1 | NOT_STARTED |
 | 7 | Billing & Licensing | P2 | 06-billing | 1, 6 | NOT_STARTED |
@@ -97,11 +97,13 @@ model for SDKs captured or marked UNKNOWN.
 ### Claims from the playbook to verify first
 | Claim | Status |
 |---|---|
-| VIVA & RTC SDKs process on customer side; API processes in cloud over WebSocket | UNVERIFIED |
-| VIVA pipeline order: voice isolation → VAD → turn detection → STT | UNVERIFIED |
-| Voice Isolation latency ≈ 20 ms | UNVERIFIED |
-| Interrupt prediction distinguishes backchannels from real interruptions | UNVERIFIED |
-| Browser SDK uses Web Audio / Workers / WASM | UNVERIFIED |
+| VIVA & RTC SDKs process on customer side; API processes in cloud over WebSocket | PARTLY VERIFIED (E022, E032) |
+| VIVA pipeline order: voice isolation → VAD → turn detection → STT | VERIFIED for isolation → turn/STT (E025) |
+| Voice Isolation latency ≈ 20 ms | NOT FOUND (E036) |
+| Interrupt prediction distinguishes backchannels from real interruptions | VERIFIED (E023) |
+| Browser SDK uses Web Audio / Workers / WASM | WASM VERIFIED (E031); rest UNKNOWN |
+
+See `investigation/03-developer-platform/DEVELOPER_PLATFORM.md`.
 
 ## 5. Real-time Audio Engine
 **Questions**
