@@ -112,3 +112,70 @@ class TestTurnTracker:
     def test_no_interruption_events_when_agent_silent(self) -> None:
         ev = feed(TurnTracker(), [(0.9, 1000), (0.0, 1000)])
         assert "interruption" not in [e[0] for e in ev]
+
+
+class TestSmartTurnJudge:
+    """The tracker with a judge: finished-sounding turns end after complete_silence_ms,
+    unfinished ones wait incomplete_silence_ms; a missing or failing judge falls back."""
+
+    CFG = TurnConfig(complete_silence_ms=300, incomplete_silence_ms=2000)
+
+    def eot_gap(self, judge: object, cfg: TurnConfig = CFG) -> float | None:
+        t = TurnTracker(cfg, judge=judge)  # type: ignore[arg-type]
+        ev = feed(t, [(0.0, 320), (0.9, 1600), (0.0, 3000)])
+        last_voice = dict(ev)["speech_end"]
+        eot = [time for kind, time in ev if kind == "end_of_turn"]
+        return eot[0] - last_voice if eot else None
+
+    def test_finished_turn_ends_fast(self) -> None:
+        assert self.eot_gap(lambda a, b: 0.9) == pytest.approx(320, abs=33)
+
+    def test_unfinished_turn_waits(self) -> None:
+        assert self.eot_gap(lambda a, b: 0.1) == pytest.approx(2016, abs=33)
+
+    def test_unsure_or_broken_judge_uses_plain_rule(self) -> None:
+        def broken(a: float, b: float) -> float:
+            raise RuntimeError("model gone")
+
+        assert self.eot_gap(lambda a, b: None) == pytest.approx(704, abs=33)
+        assert self.eot_gap(broken) == pytest.approx(704, abs=33)
+
+    def test_judge_sees_turn_up_to_last_voice(self) -> None:
+        spans: list[tuple[float, float]] = []
+        t = TurnTracker(self.CFG, judge=lambda a, b: spans.append((a, b)) or 0.9)
+        feed(t, [(0.0, 800), (0.9, 1600), (0.0, 1000)])
+        ((a, b),) = spans
+        assert a == pytest.approx(800 - self.CFG.pre_speech_ms, abs=33)
+        assert b == pytest.approx(2400, abs=33)  # the last voiced window, not the silence
+
+    def test_resumed_speech_is_one_turn_and_rejudged(self) -> None:
+        verdicts = iter([0.1, 0.9])
+        t = TurnTracker(self.CFG, judge=lambda a, b: next(verdicts))
+        ev = feed(t, [(0.9, 800), (0.0, 1200), (0.9, 800), (0.0, 1000)])
+        types = [e[0] for e in ev]
+        assert types.count("end_of_turn") == 1  # the 1.2 s pause sounded unfinished
+        assert types.count("speech_end") == 2
+
+    def test_probability_in_event(self) -> None:
+        t = TurnTracker(self.CFG, judge=lambda a, b: 0.876)
+        events = []
+        now = 0.0
+        for p, dur in [(0.9, 800), (0.0, 1000)]:
+            for _ in range(round(dur / 32)):
+                events += t.update(now, p)
+                now += 32
+        eot = next(e for e in events if e.type == "end_of_turn")
+        assert eot.to_dict()["complete_probability"] == 0.876
+
+
+def test_smart_turn_model_judges_real_speech() -> None:
+    from nexora_audio.backends import smart_turn
+
+    if smart_turn.probe() is not None:
+        pytest.skip(smart_turn.probe())
+    rng = np.random.default_rng(1)
+    p = smart_turn.complete_probability(rng.standard_normal(16000).astype(np.float32) * 0.01)
+    assert 0.0 <= p <= 1.0
+    assert hashlib.sha256(smart_turn.model_path().read_bytes()).hexdigest() == (
+        "2bb026316b14a660486a75b1733cd3fbab8c2fd0314dc9af7be49f8cca967e4f"
+    )

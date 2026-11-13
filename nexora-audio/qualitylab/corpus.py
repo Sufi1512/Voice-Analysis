@@ -217,15 +217,54 @@ def echo_case(
     )
 
 
-def turn_case(clip: str, speech: np.ndarray, pauses_ms: list[float]) -> Case:
-    """Insert silent pauses at the quietest word gaps; the turn really ends after the clip."""
+# Pause points inside a sentence (seconds into the MS-SNSD clip), each at a short word gap.
+# Chosen from Whisper transcripts of the 2.5 s before and 1.5 s after the point, checked by
+# hand, and labelled by grammar alone (not by any turn model):
+#   mid    - the words so far cannot be a whole sentence: "...a lot of | people will roam",
+#            "...ten years ago they | blew up some of our ditches"
+#   clause - they could be, but the speaker goes on with the same sentence: "his captain was
+#            thin and haggard | and his beautiful boots were worn"
+MID_SENTENCE_POINTS: dict[str, list[float]] = {
+    "clnsp15": [3.30, 7.76],
+    "clnsp17": [2.15],
+    "clnsp18": [8.55],
+    "clnsp19": [7.76],
+    "clnsp22": [1.64, 10.12],
+}
+CLAUSE_POINTS: dict[str, list[float]] = {
+    "clnsp15": [2.25, 6.63],
+    "clnsp16": [3.36],
+    "clnsp17": [3.69, 5.52],
+    "clnsp18": [6.67],
+    "clnsp19": [8.08],
+    "clnsp20": [5.25],
+    "clnsp22": [7.34, 11.10],
+    "clnsp23": [2.80],
+}
+
+
+def turn_case(
+    clip: str,
+    speech: np.ndarray,
+    pauses_ms: list[float],
+    at_s: list[float] | None = None,
+    kind: str = "mid",
+) -> Case:
+    """Insert silent pauses; the turn really ends after the clip.
+
+    Without ``at_s`` the pauses go in the quietest gaps near 1/3 and 2/3 of the clip, which in
+    this read-speech corpus are the gaps *between two full sentences* (kind ``sentence``).
+    With ``at_s`` they go at those points (``kind`` ``mid`` or ``clause``, see above).
+    """
     x = _level(speech)
     hop = RATE // 50
     e = np.convolve(
         np.mean(x[: len(x) // hop * hop].reshape(-1, hop) ** 2, axis=1), np.ones(5) / 5, mode="same"
     )
     cuts: list[int] = []
-    for k, _ in enumerate(pauses_ms):
+    if at_s is not None:
+        cuts = [round(t * RATE) for t in at_s]
+    for k, _ in enumerate(pauses_ms if at_s is None else []):
         lo, hi = (
             len(e) * (k + 1) // (len(pauses_ms) + 1) - len(e) // 8,
             len(e) * (k + 1) // (len(pauses_ms) + 1) + len(e) // 8,
@@ -244,8 +283,10 @@ def turn_case(clip: str, speech: np.ndarray, pauses_ms: list[float]) -> Case:
     s = _pad(body, tail=3.0)
     nz = synth.scale_to_snr(s, _noise("pink", len(s), seed_of(clip, "turn")), 25)
     end = LEAD_S + len(body) / RATE
+    if at_s is None:
+        kind = "sentence"
     return Case(
-        f"turns/{clip}",
+        f"turns/{clip}" if at_s is None else f"turns-{kind}/{clip}@{at_s[0]:.2f}",
         "turns",
         RATE,
         (s + nz).astype(np.float32),
@@ -253,8 +294,21 @@ def turn_case(clip: str, speech: np.ndarray, pauses_ms: list[float]) -> Case:
         nz,
         speech_span=(LEAD_S, end),
         labels={"pauses": pauses, "true_end": end},
-        meta={"clip": clip, "pauses_ms": pauses_ms},
+        meta={"clip": clip, "pauses_ms": pauses_ms, "kind": kind},
     )
+
+
+def mid_turn_cases(clips: dict[str, np.ndarray]) -> Iterator[Case]:
+    """One hesitation pause (0.6-1.5 s) inside a sentence per case."""
+    lengths = [600, 900, 1200, 1500]
+    k = 0
+    for kind, table in (("mid", MID_SENTENCE_POINTS), ("clause", CLAUSE_POINTS)):
+        for clip, points in table.items():
+            if clip not in clips:
+                continue
+            for t in points:
+                yield turn_case(clip, clips[clip], [lengths[k % 4]], at_s=[t], kind=kind)
+                k += 1
 
 
 # -- profiles -----------------------------------------------------------------------
@@ -294,6 +348,8 @@ def build(profile: str) -> Iterator[Case]:
         yield echo_case(clip(6), clips[clip(6)], clip(7), clips[clip(7)], 120, 0)
         yield echo_case(clip(9), clips[clip(9)], clip(10), clips[clip(10)], 0, None)
         yield turn_case(clip(8), clips[clip(8)], [500, 900])
+        if "clnsp19" in clips:
+            yield turn_case("clnsp19", clips["clnsp19"], [900], at_s=[7.76])
         return
     if profile != "full":
         raise ValueError(f"unknown profile {profile!r}")
@@ -334,3 +390,4 @@ def build(profile: str) -> Iterator[Case]:
     for i in range(8):
         c = clip(i + 13)
         yield turn_case(c, clips[c], plans[i % len(plans)])
+    yield from mid_turn_cases(clips)

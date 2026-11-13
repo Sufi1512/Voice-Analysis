@@ -61,6 +61,16 @@ def test_telephony_8k(enc: str) -> None:
         audio, events = run(s, data)
     assert len(audio) >= len(data)
     assert {"speech_start", "end_of_turn"} <= {e.type for e in events}
+    # Smart Turn judged the pauses on the resampled (8 -> 16 kHz) caller audio
+    assert any("complete_probability" in e.data for e in events if e.type == "end_of_turn")
+
+
+def test_smart_turn_can_be_turned_off() -> None:
+    data = padded_speech_bytes(PCM16)
+    with StreamSession(input_format=PCM16, turns=TurnConfig(smart_turn=False)) as s:
+        _, events = run(s, data)
+    eots = [e for e in events if e.type == "end_of_turn"]
+    assert eots and all("complete_probability" not in e.data for e in eots)
 
 
 def test_output_format_conversion() -> None:

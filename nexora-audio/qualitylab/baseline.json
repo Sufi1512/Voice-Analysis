@@ -1,6 +1,6 @@
 {
  "fast": {
-  "chunk_time": 5.883,
+  "chunk_time": 6.57,
   "double_talk_cut": 10.56,
   "erle": 92.8,
   "false_barge_echo": 0.0,
@@ -11,15 +11,17 @@
   "pause_level": -41.2,
   "pause_noise": -3.6,
   "pumping": 15.0,
-  "reply_gap": 600.0,
+  "reply_gap": 406.0,
+  "sentence_pause_cut": 100.0,
   "speech_cut": 1.0,
   "stoi_no_harm": -0.0189,
-  "turn_cutoff": 100.0,
+  "turn_cutoff": 0.0,
   "wer_clean": 0.0,
   "wer_noisy": -7.142857142857134
  },
  "full": {
-  "chunk_time": 8.553,
+  "chunk_time": 11.31,
+  "clause_pause_cut": 36.36363636363637,
   "double_talk_cut": 44.44,
   "erle": 14.4,
   "false_barge_echo": 0.0,
@@ -30,10 +32,11 @@
   "pause_level": -24.1,
   "pause_noise": -2.5,
   "pumping": 21.01,
-  "reply_gap": 704.0,
+  "reply_gap": 648.0,
+  "sentence_pause_cut": 75.0,
   "speech_cut": 5.16,
   "stoi_no_harm": -0.0666,
-  "turn_cutoff": 87.5,
+  "turn_cutoff": 14.285714285714286,
   "wer_clean": 0.4098360655737705,
   "wer_noisy": 10.58931860036834
  }

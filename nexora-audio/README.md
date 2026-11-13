@@ -49,13 +49,16 @@ def on_agent_tts(playing: bool) -> None:
 |---|---|---|
 | `speech_start` | user started talking | optional: lower TTS volume |
 | `speech_end` | user stopped (300 ms silence) | |
-| `end_of_turn` | user finished their turn (700 ms silence after at least 200 ms of speech) | send the transcript to the LLM |
+| `end_of_turn` | user finished their turn: 700 ms of silence if it sounds finished, 2 s if it sounds unfinished (Smart Turn), at least 200 ms of speech | send the transcript to the LLM |
 | `interruption` | user talked over the agent for 400 ms or more | stop TTS now |
 | `backchannel` | short "uh-huh"/"yeah" while the agent talks | keep talking |
 
-Turn and interruption detection is **rule-based** (Silero VAD plus timing, tunable via
-`TurnConfig`). It doesn't understand words, so it can't tell an unfinished sentence from
-a finished one, or a short "stop!" from a short "yeah".
+End of turn uses **Smart Turn v3.2** (Daily, BSD-2, bundled): at each pause it judges from
+the audio whether the caller sounds finished, and waits longer when they don't ("I'd like
+to book a flight to..."). `end_of_turn` carries `complete_probability`. Tune it with
+`TurnConfig` (`complete_silence_ms`, `incomplete_silence_ms`; `smart_turn=False` for the
+plain 700 ms rule). Lab results and limits: `docs/E5_SPEC.md`. Interruptions are still
+rule based: a short "stop!" and a short "yeah" look the same.
 
 A complete reference bridge (client WS -> nexora -> agent WS, with JSON events and
 automatic agent-speaking detection) is in `nexora_audio.integrations.websocket_bridge`:
@@ -173,7 +176,7 @@ and `src/nexora_audio/_native/PROVENANCE.md`. Dependency review:
 `docs/DEPENDENCY_LICENSES.md`. The licence for nexora-audio itself has not been chosen yet.
 
 ## Quality lab
-Every audio change is measured on a 242-case test corpus (noise, phone, reverb, echo, turns,
+Every audio change is measured on a 276-case test corpus (noise, phone, reverb, echo, turns,
 packet loss) against quality gates: `python -m qualitylab run --profile fast`. See
 `docs/QUALITY_BASELINE.md` and `docs/VOICE_QUALITY_PLAN.md`.
 

@@ -20,12 +20,15 @@ import asyncio
 import threading
 import time
 from dataclasses import dataclass, field
+from math import gcd
 from types import TracebackType
 from typing import Any, Self
 
 import numpy as np
 from pydantic import ValidationError
+from scipy.signal import resample_poly
 
+from nexora_audio.backends import smart_turn
 from nexora_audio.backends.aec3 import AEC3Processor
 from nexora_audio.client import NexoraAudio
 from nexora_audio.config import NexoraConfig
@@ -39,6 +42,8 @@ from nexora_audio.streaming.quality import QualityMonitor
 from nexora_audio.streaming.turns import TurnConfig, TurnEvent, TurnTracker
 from nexora_audio.utils.audio_utils import Float32Array
 from nexora_audio.utils.metrics import TimingStats
+
+RING_S = 10.0  # Smart Turn looks at the last 8 s
 
 
 @dataclass(frozen=True, slots=True)
@@ -105,6 +110,12 @@ class StreamSession:
             StreamingResampler(rin, rout, self.input_format.channels) if rin != rout else None
         )
         self._turns = TurnTracker(turns) if turns is not None else None
+        # processed caller audio (mono, input rate) for the Smart Turn judge
+        self._ring = np.zeros(0, np.float32)
+        self._ring_end = 0  # output samples produced so far
+        self._ring_keep = int(RING_S * self.input_format.sample_rate)
+        if self._turns is not None and turns is not None and turns.smart_turn:
+            self._turns.judge = self._judge if smart_turn.probe() is None else None
         rate = self.input_format.sample_rate
         self._plc = (
             LossConcealer(rate, SILENCE_LEVEL[self.input_format.encoding])
@@ -239,6 +250,7 @@ class StreamSession:
         if planar.shape[1]:
             self._track_echo(planar.mean(axis=0) if planar.shape[0] > 1 else planar[0])
         out = self._pipeline.process(planar) if planar.shape[1] else planar
+        self._remember(out)
         events = self._collect_events()
         audio = self._encode(out)
         self.timing.add(time.perf_counter() - t0)
@@ -295,6 +307,7 @@ class StreamSession:
         with self._lock:
             self._check_open()
             out = self._pipeline.flush()
+            self._remember(out)
             events = self._collect_events()
             audio = self._encode(out)
             if self._out_rs is not None:
@@ -316,6 +329,7 @@ class StreamSession:
             self._timeline.reset()
             self._gate.reset()
             self._pos, self._agent_auto = 0, False
+            self._ring, self._ring_end = np.zeros(0, np.float32), 0
             self._hop_buf = np.zeros(0, np.float32)
             self.timing.reset()
 
@@ -353,6 +367,28 @@ class StreamSession:
         if self._out_rs is not None:
             planar = self._out_rs.process(planar)
         return encode(planar, self.output_format) if planar.shape[1] else b""
+
+    def _remember(self, out: Float32Array) -> None:
+        if self._turns is None or self._turns.judge is None or not out.shape[1]:
+            return
+        mono = out.mean(axis=0) if out.shape[0] > 1 else out[0]
+        self._ring = np.concatenate([self._ring, mono.astype(np.float32)])[-self._ring_keep :]
+        self._ring_end += out.shape[1]
+
+    def _judge(self, start_ms: float, end_ms: float) -> float | None:
+        """Smart Turn on the processed caller audio between two input-timeline times."""
+        rate = self.input_format.sample_rate
+        lat = self._latency_ms
+        first = self._ring_end - len(self._ring)
+        a = max(round((start_ms + lat) * rate / 1000), first)
+        b = min(round((end_ms + lat) * rate / 1000), self._ring_end)
+        if b - a < rate // 10:
+            return None
+        x = self._ring[a - first : b - first]
+        if rate != smart_turn.MODEL_RATE:
+            g = gcd(rate, smart_turn.MODEL_RATE)
+            x = resample_poly(x, smart_turn.MODEL_RATE // g, rate // g).astype(np.float32)
+        return smart_turn.complete_probability(x)
 
     def _collect_events(self) -> list[TurnEvent]:
         results = self._pipeline.pop_results()

@@ -45,6 +45,12 @@ Official model from `models/` in the same commit, sha256
 From the `silero-vad` 6.2.3 wheel on PyPI (`silero_vad/data/silero_vad.onnx`), MIT,
 sha256 `1a153a22f4509e292a94e67d6f9b85e8deb25b4988682b7e174c65279d8788e3`, unchanged.
 
+## ../_models/smart-turn-v3.2-cpu.onnx and ../backends/_whisper_features.py
+From the `pipecat-ai` 1.16.0 wheel on PyPI (`pipecat/audio/turn/smart_turn/data/` and
+`pipecat/audio/turn/smart_turn/_whisper_features.py`), BSD-2-Clause (Daily; the feature code
+has Apache-2.0 Hugging Face portions). Model sha256
+`2bb026316b14a660486a75b1733cd3fbab8c2fd0314dc9af7be49f8cca967e4f`, both unchanged.
+
 Other platforms (macOS, Windows, Linux aarch64) are not bundled yet. Point
 `NEXORA_DEEPFILTER_LIBRARY` at a libdf built with the command above, and/or
 `NEXORA_RNNOISE_LIBRARY` at a librnnoise built from the same RNNoise release (or install

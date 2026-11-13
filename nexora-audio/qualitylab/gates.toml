@@ -147,10 +147,35 @@ id = "turn_cutoff"
 title = "Mid-sentence pauses taken as end of turn (%)"
 metric = "pauses_cut"
 sets = ["turns"]
+kind = "mid"
 agg = "pause_pct"
 op = "<="
 threshold = 3.0
 tolerance = 0
+phase = "E5"
+
+[[gate]]
+id = "clause_pause_cut"
+title = "Pauses after a clause, mid-sentence, taken as end of turn (%)"
+metric = "pauses_cut"
+sets = ["turns"]
+kind = "clause"
+agg = "pause_pct"
+op = "<="
+threshold = 20.0
+tolerance = 10.0
+phase = "E5"
+
+[[gate]]
+id = "sentence_pause_cut"
+title = "Pauses between two full sentences taken as end of turn (%)"
+metric = "pauses_cut"
+sets = ["turns"]
+kind = "sentence"
+agg = "pause_pct"
+op = "<="
+threshold = 50.0
+tolerance = 10.0
 phase = "E5"
 
 [[gate]]

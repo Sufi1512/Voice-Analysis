@@ -109,6 +109,18 @@ Copyright (c) 2011, Google Inc. All rights reserved. BSD-3-Clause: full text in
 Abseil C++ `20240722.0`, Copyright The Abseil Authors. Apache License 2.0: full text in
 `_native/licenses/abseil-LICENSE.txt`. Unmodified.
 
+## Smart Turn v3.2 (bundled model `_models/smart-turn-v3.2-cpu.onnx`) and Whisper features (`backends/_whisper_features.py`)
+
+End-of-turn model by Daily (https://github.com/pipecat-ai/smart-turn); code, weights and
+training data are BSD 2-Clause. Copied unchanged from the `pipecat-ai` 1.16.0 wheel
+(`pipecat/audio/turn/smart_turn/data/` and `pipecat/audio/turn/smart_turn/_whisper_features.py`).
+Copyright (c) 2024-2026, Daily. Full licence text: `_native/licenses/pipecat-smart-turn-LICENSE.txt`.
+
+`_whisper_features.py` contains portions derived from Hugging Face Transformers
+(`WhisperFeatureExtractor`), Copyright 2022-2023 The HuggingFace Inc. team and the librosa &
+torchaudio authors, Apache License 2.0 (full text: `_native/licenses/apache-2.0.txt`),
+modified by Daily. nexora-audio does not modify the file further.
+
 ## onnxruntime (dependency, MIT)
 
 ## Optional dependencies (installed separately, not bundled)

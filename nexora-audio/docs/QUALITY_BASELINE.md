@@ -29,7 +29,7 @@ than `qualitylab/baseline.json` by more than its tolerance. CI: `.github/workflo
 | reverb | 6 | Synthetic rooms, RT60 0.3 and 0.6 s, plus noise |
 | loss | 16 | 1, 3, 5, 10% packet loss (bursty), each paired with a loss-free twin |
 | echo | 12 | Agent speech leaking back through a simulated speakerphone (delay 40/120/250 ms, echo at 0 and −10 dB), agent-only and double-talk |
-| turns | 8 | Speech with inserted pauses of 400–1200 ms, to measure cut-offs and reply delay |
+| turns | 26 | Speech with inserted pauses of 400–1500 ms, to measure cut-offs and reply delay: 7 inside an unfinished sentence, 11 after a clause the sentence goes on from, 8 cases (16 pauses) between two full sentences (see `E5_SPEC.md`) |
 
 Sources and licences: `qualitylab/SOURCES.md`. Speech-to-text accuracy uses Whisper tiny.en
 as a stand-in for the customer's STT, with the clean-speech transcript as reference.
@@ -155,6 +155,25 @@ level is treated as background and removed in pauses. Report: `docs/quality/repo
 | TV / neighbour (as loud as the caller) | -3.9 dB | -3.9 dB (needs E11) |
 
 Speech cut: clean speech average 0.11% → 0.20%; phone worst case unchanged (3.7%).
+
+## Update after E5 (2026-11-14)
+
+E5 (`E5_SPEC.md`) adds Smart Turn v3.2: at each pause it judges whether the caller sounds
+finished, and waits 2 s instead of 700 ms when they do not. The turn cases were extended
+first: the old ones only paused between two full sentences. Report:
+`docs/quality/report-full-2026-11-14-e5.md`.
+
+| Pauses taken as end of turn | Before E5 (700 ms rule) | After E5 |
+| --- | --- | --- |
+| Inside an unfinished sentence (7) | 71% | 14% (1 of 7) |
+| After a clause, sentence goes on (11) | 73% | 36% |
+| Between two full sentences (16) | 88% | 75% |
+| Reply gap, median / p90 | 650 / 744 ms | 648 / 1328 ms |
+
+The before column is the old rule on the new cases; the old `turn_cutoff` baseline (87.5%)
+measured the between-sentence pauses only. Every other gate is unchanged from E3.
+`chunk_time` read 11.3 ms with two workers sharing two CPUs; unloaded, the same cases take
+5.9 ms with Smart Turn and 5.6 ms without.
 
 ## Known limits of this baseline
 
