@@ -1,0 +1,66 @@
+[build-system]
+requires = ["hatchling>=1.24"]
+build-backend = "hatchling.build"
+
+[project]
+name = "nexora-audio"
+dynamic = ["version"]
+description = "Real-time AI audio processing SDK: noise cancellation, VAD, gain control and streaming."
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [{ name = "Sufiyan Khan" }]
+keywords = ["audio", "noise-suppression", "vad", "real-time", "voice-agents", "webrtc"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Multimedia :: Sound/Audio :: Analysis",
+  "Typing :: Typed",
+]
+dependencies = [
+  "numpy>=1.24",
+  "scipy>=1.10",
+  "pydantic>=2.5",
+]
+
+[project.optional-dependencies]
+devices = ["sounddevice>=0.4.6"]
+io = ["soundfile>=0.12"]
+eval = ["pystoi>=0.4"]
+dev = [
+  "pytest>=8",
+  "ruff>=0.6",
+  "mypy>=1.10",
+  "scipy-stubs",
+  "soundfile>=0.12",
+]
+
+[tool.hatch.version]
+path = "src/nexora_audio/version.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/nexora_audio"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+markers = [
+  "device: needs a real audio device and PortAudio (skipped in CI)",
+  "slow: long-running benchmark or quality test",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests"]
+extend-exclude = ["spikes"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "N", "SIM", "RUF", "NPY"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+files = ["src"]
+plugins = ["pydantic.mypy"]

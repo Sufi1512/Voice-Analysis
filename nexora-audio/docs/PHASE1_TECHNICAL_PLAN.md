@@ -1,6 +1,7 @@
 # Nexora Audio SDK (Python) — Phase 1 technical plan
 
-**Status:** awaiting approval. No SDK code written yet.
+**Status:** approved 2026-11-13 with defaults: Q1 vendor prebuilt RNNoise, Q2 download licensed fixtures after licence check, Q3 stay in Voice-Analysis, Q4 Python 3.11–3.13.
+**Progress:** Phase 3 ✅ (2026-11-13). Next: Phase 4 (devices).
 **Inputs:** Nexora implementation prompt; Krisp findings in
 `../../investigation/03-developer-platform/DEVELOPER_PLATFORM.md`; Phase 2 results in
 `DEPENDENCY_LICENSES.md`; spike in `../spikes/feasibility_spike.py`.
@@ -86,7 +87,7 @@ The prompt's tree is kept, with these changes:
 ## 3. Implementation plan (remaining phases)
 | Phase | Deliverable | Done when (tests) |
 |---|---|---|
-| 3 | `pyproject` (hatchling, src layout), config, exceptions, `Processor`/`AudioFrame`, Reframer, Resampler, Pipeline, capabilities | Unit: config validation, reframer round-trip for 10/20/32/40 ms chunks, resampler 16↔48 kHz SNR > 60 dB on sine, pipeline latency arithmetic |
+| 3 ✅ | `pyproject` (hatchling, src layout), config, exceptions, `Processor`/`AudioFrame`, Reframer, Resampler, Pipeline, capabilities | Unit: config validation, reframer round-trip for 10/20/32/40 ms chunks, resampler 16↔48 kHz SNR > 60 dB on sine, pipeline latency arithmetic |
 | 4 | devices: enumerate, select, capture + playback via sounddevice; SPSC ring buffer | Unit: ring buffer under concurrent producer/consumer. Device test **skipped without PortAudio**, run on your machine |
 | 5 | RNNoise backend (ctypes), NoiseCancellation processor, `process_chunk`, `process_file` | Integration: WAV in → WAV out, sample count preserved (minus reported latency), SNR gain > 5 dB at 0 dB input SNR on fixtures; no allocations per frame in hot path |
 | 6 | Engine worker thread, `start_microphone`, `get_processed_stream`, dropout accounting | Integration: simulated device feeding the engine at real-time pace for 60 s → 0 dropouts at 10 ms frames |
