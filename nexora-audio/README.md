@@ -4,9 +4,10 @@ Real-time audio processing SDK for Python: noise cancellation, voice activity
 detection, gain control and streaming for voice agents, WebRTC, call-center
 and meeting applications.
 
-> **Status: 0.1.0.dev0, Phases 3 and 5 of 9 done.** Noise cancellation (RNNoise)
-> works for streaming chunks and files. Microphone capture, VAD and gain control
-> are not implemented yet. Asking for them raises `FeatureUnavailableError`.
+> **Status: 0.1.0.dev0, Phases 3 and 5 of 9 done.** Noise cancellation (RNNoise),
+> voice enhancement and gain control work for streaming chunks and files.
+> Microphone capture and VAD are not implemented yet. Asking for them raises
+> `FeatureUnavailableError`.
 > See `docs/PHASE1_TECHNICAL_PLAN.md`.
 
 ## Install (local, not published)
@@ -40,17 +41,26 @@ removed so the two line up sample for sample.
 
 ```python
 with NexoraAudio(sample_rate=16000, frame_ms=10) as audio:
-    for chunk in incoming_chunks():          # int16 or float32, 1-D or (samples, channels)
-        clean = audio.process_chunk(chunk)   # same dtype and layout back
+    for chunk in incoming_chunks():  # int16 or float32, 1-D or (samples, channels)
+        clean = audio.process_chunk(chunk)  # same dtype and layout back
         send_to_stt(clean)
-    send_to_stt(audio.flush())               # end of stream
+    send_to_stt(audio.flush())  # end of stream
 ```
 
 - Chunks that are a multiple of `audio.config.frame_samples` come back at the same size.
 - `audio.latency.algorithmic_ms` gives the added delay: 20 ms at 48 kHz, 22 ms at 16 kHz
   (RNNoise plus resampling).
-- `audio.reset()` starts a new, unrelated stream. `noise_cancellation_strength=` (0–1)
-  blends in the original signal.
+- `audio.reset()` starts a new, unrelated stream.
+
+## Default processing and tuning
+| Setting | Default | Effect |
+|---|---|---|
+| `noise_cancellation_strength` | `0.85` | Caps suppression at ~16.5 dB so quiet words never cut out. `1.0` removes more noise but drops weak speech in strong noise |
+| `voice_enhancement` | `True` | 80 Hz high-pass, clarity boost, peak limiter at -1 dBFS (no added delay) |
+| `clarity_db` | `3.0` | Presence boost at 3 kHz (0–9 dB) |
+| `auto_gain_control` | `False` | Slow speech leveler towards `agc_target_dbfs` (-20). Turn on when talker volume varies a lot |
+
+Why these defaults: `docs/PHASE1_TECHNICAL_PLAN.md`, section 8.
 
 ## Check what runs on this machine
 
@@ -69,9 +79,10 @@ Intel Xeon 2.1 GHz, 2 vCPU, Python 3.13, noisy speech, `process_chunk` timing on
 | 48 kHz | 40 ms | 0.38 ms | 1.05 ms | 0.010 | 20.0 ms |
 | 16 kHz | 10 ms | 0.29 ms | 0.40 ms | 0.029 | 22.0 ms |
 
-These are processing times, not end-to-end device latency. Measured on a public-domain
-speech clip with added white noise at 0 dB SNR: SI-SDR improved from 0 dB to about 13 dB.
-Synthetic-noise results are not proof of real-world quality.
+These are processing times, not end-to-end device latency (timed before voice
+enhancement was added; the enhancer is a few IIR filters). Quality on a public-domain
+speech clip with added noise is in the technical plan, section 8. Synthetic-noise
+results are not proof of real-world quality.
 
 ## Examples
 - `examples/process_audio_file.py noisy.wav clean.wav`

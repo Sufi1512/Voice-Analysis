@@ -111,7 +111,9 @@ class RNNoiseProcessor(Processor):
     Args:
         channels: 1 or 2. Each channel gets its own denoiser state.
         strength: 0..1 mix of denoised signal with the (delay-aligned) original.
-            1.0 is full suppression.
+            1.0 is full suppression. Below 1.0 caps the attenuation at
+            ``20*log10(1 - strength)`` dB (0.85 is about 16.5 dB), which stops RNNoise
+            from wiping out quiet speech in strong noise (heard as words cutting out).
     """
 
     name = "rnnoise"

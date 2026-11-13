@@ -15,7 +15,8 @@ class TestConfig:
     def test_defaults(self) -> None:
         c = NexoraConfig()
         assert c.sample_rate == 48000 and c.channels == 1 and c.frame_samples == 480
-        assert c.requested_features() == ["noise_cancellation"]
+        assert c.requested_features() == ["noise_cancellation", "voice_enhancement"]
+        assert c.noise_cancellation_strength == 0.85
 
     @pytest.mark.parametrize("rate", [11025, 96000, 0])
     def test_rejects_unsupported_rate(self, rate: int) -> None:
@@ -49,13 +50,15 @@ class TestConfig:
             c.sample_rate = 16000  # type: ignore[misc]
 
     def test_feature_order(self) -> None:
-        c = NexoraConfig(vad=True, auto_gain_control=True, echo_cancellation=True)
+        c = NexoraConfig(vad=True, echo_cancellation=True)
         assert c.requested_features() == [
             "echo_cancellation",
             "noise_cancellation",
-            "auto_gain_control",
+            "voice_enhancement",
             "vad",
         ]
+        c = NexoraConfig(voice_enhancement=False, auto_gain_control=True)
+        assert c.requested_features() == ["noise_cancellation", "auto_gain_control"]
 
 
 class TestAudioUtils:

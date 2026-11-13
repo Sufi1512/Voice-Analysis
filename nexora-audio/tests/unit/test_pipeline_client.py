@@ -64,6 +64,9 @@ class TestPipeline:
             Pipeline(48000, 2, [DelayProcessor(1, 48000, 480, channels=1)])
 
 
+NC_ONLY = {"voice_enhancement": False, "auto_gain_control": False}
+
+
 def _registry(available: bool = True) -> BackendRegistry:
     reg = BackendRegistry()
     reg.register(
@@ -94,6 +97,7 @@ class TestClient:
             "noise_cancellation",
             "voice_isolation",
             "echo_cancellation",
+            "voice_enhancement",
             "auto_gain_control",
             "vad",
         }
@@ -103,24 +107,26 @@ class TestClient:
         assert ei.value.feature == "noise_cancellation"
 
     def test_falls_back_to_next_available_backend(self) -> None:
-        audio = NexoraAudio(registry=_registry())
+        audio = NexoraAudio(registry=_registry(), **NC_ONLY)
         assert audio.capabilities()["noise_cancellation"].backend == "fake"
         with audio:
             assert audio.initialized and audio.latency.total_ms >= 0
         assert not audio.initialized
 
     def test_reports_all_probe_failures(self) -> None:
-        status = NexoraAudio(registry=_registry(False)).capabilities()["noise_cancellation"]
+        status = NexoraAudio(registry=_registry(False), **NC_ONLY).capabilities()[
+            "noise_cancellation"
+        ]
         assert not status.available
         assert "broken: lib missing" in status.reason and "fake: not installed" in status.reason
 
     def test_unknown_preferred_backend(self) -> None:
-        audio = NexoraAudio(registry=_registry(), noise_backend="webrtc")
+        audio = NexoraAudio(registry=_registry(), **NC_ONLY, noise_backend="webrtc")
         with pytest.raises(FeatureUnavailableError, match="not registered"):
             audio.initialize()
 
     def test_voice_isolation_never_silently_ignored(self) -> None:
-        audio = NexoraAudio(registry=_registry(), voice_isolation=True)
+        audio = NexoraAudio(registry=_registry(), **NC_ONLY, voice_isolation=True)
         with pytest.raises(FeatureUnavailableError, match="voice_isolation"):
             audio.initialize()
 
@@ -131,7 +137,7 @@ class TestClient:
             NexoraAudio(NexoraConfig(), sample_rate=16000)
 
     def test_latency_requires_initialize_and_close_is_idempotent(self) -> None:
-        audio = NexoraAudio(registry=_registry())
+        audio = NexoraAudio(registry=_registry(), **NC_ONLY)
         with pytest.raises(NotInitializedError):
             _ = audio.latency
         audio.close()

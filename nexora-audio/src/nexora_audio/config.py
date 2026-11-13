@@ -28,12 +28,30 @@ class NexoraConfig(BaseModel):
 
     # Features
     noise_cancellation: bool = True
-    noise_cancellation_strength: float = Field(1.0, ge=0.0, le=1.0)
+    noise_cancellation_strength: float = Field(
+        0.85,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "1.0 = maximum suppression. The default 0.85 caps attenuation at about 16.5 dB, "
+            "which keeps quiet words from cutting out (see docs, section 8)."
+        ),
+    )
     noise_backend: NoiseBackend = "auto"
     voice_isolation: bool = False
     echo_cancellation: bool = False
-    auto_gain_control: bool = False
-    agc_target_dbfs: float = Field(-18.0, ge=-31.0, le=0.0)
+    voice_enhancement: bool = Field(
+        True, description="80 Hz high-pass, clarity EQ and peak limiter (plus AGC if enabled)."
+    )
+    clarity_db: float = Field(3.0, ge=0.0, le=9.0, description="Presence boost at 3 kHz, dB.")
+    auto_gain_control: bool = Field(
+        False,
+        description=(
+            "Slowly level speech towards agc_target_dbfs. Off by default: it costs a little "
+            "intelligibility; turn on when talker volume varies a lot."
+        ),
+    )
+    agc_target_dbfs: float = Field(-20.0, ge=-31.0, le=0.0)
     vad: bool = False
     vad_threshold: float = Field(0.5, gt=0.0, lt=1.0)
 
@@ -62,12 +80,17 @@ class NexoraConfig(BaseModel):
         return round(self.sample_rate * self.frame_ms / 1000.0)
 
     def requested_features(self) -> list[str]:
-        """Names of features switched on, in pipeline order."""
+        """Names of features switched on, in pipeline order.
+
+        When ``voice_enhancement`` is on, gain control runs inside it, so
+        ``auto_gain_control`` is not listed separately.
+        """
         order = [
             ("echo_cancellation", self.echo_cancellation),
             ("noise_cancellation", self.noise_cancellation),
             ("voice_isolation", self.voice_isolation),
-            ("auto_gain_control", self.auto_gain_control),
+            ("voice_enhancement", self.voice_enhancement),
+            ("auto_gain_control", self.auto_gain_control and not self.voice_enhancement),
             ("vad", self.vad),
         ]
         return [name for name, enabled in order if enabled]

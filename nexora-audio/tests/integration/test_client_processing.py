@@ -9,10 +9,13 @@ import soundfile as sf
 from nexora_audio import AudioFormatError, NexoraAudio, NotInitializedError
 from tests.audio_fixtures import mix, si_sdr, speech, white
 
+# noise-cancellation quality is measured without EQ/levelling, which SI-SDR would penalise
+NC_ONLY = {"voice_enhancement": False, "auto_gain_control": False}
+
 
 @pytest.fixture
 def audio() -> NexoraAudio:
-    a = NexoraAudio(noise_cancellation=True, sample_rate=48000)
+    a = NexoraAudio(noise_cancellation=True, sample_rate=48000, **NC_ONLY)
     a.initialize()
     yield a
     a.close()
@@ -37,7 +40,7 @@ class TestProcessChunk:
         assert out.dtype == np.int16 and out.shape == (4800, 1)
 
     def test_improves_speech_at_16k_through_resampling(self) -> None:
-        with NexoraAudio(sample_rate=16000) as a:
+        with NexoraAudio(sample_rate=16000, **NC_ONLY) as a:
             clean = speech(16000)
             noisy = mix(clean, white(len(clean)), 0)
             y = np.concatenate(

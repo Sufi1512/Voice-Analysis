@@ -132,3 +132,36 @@ Synthetic harmonic "speech" + white noise, 2 vCPU, Python 3.13:
 - **Known packaging issue (Phase 9):** the wheel is tagged `py3-none-any` but contains a
   Linux x86_64 binary. Needs platform-tagged wheels (cibuildwheel) and builds for
   macOS/Windows/aarch64.
+
+## 8. Fix: speech cutting out, and voice enhancement (2026-11-13)
+**Problem reported:** audio cut out in places. **Cause, measured:** at full strength
+RNNoise removed 32–47% of speech frames (more than 10 dB below the clean speech), in
+gaps of up to 350 ms, at 0–10 dB SNR.
+
+Tried and rejected: gating extra protection on RNNoise's own speech probability.
+Its detector misses the same quiet syllables it removes (dropouts only fell to ~20%).
+
+**Shipped:**
+1. `noise_cancellation_strength` default **0.85**, which caps attenuation at about 16.5 dB.
+2. New `voice_enhancement` feature (default on, zero latency): 80 Hz high-pass,
+   +3 dB clarity EQ at 3 kHz, peak limiter at -1 dBFS.
+3. `auto_gain_control` (slow speech leveler, 0.4 s / 2.5 s, noise-floor gated) is now
+   **opt-in**. Even slowed down it cost ~0.015 STOI. The first fast version cost ~0.07
+   and raised the background noise.
+
+Real speech (JFK clip, 16 kHz), STOI / speech dropouts / speech-to-pause contrast:
+
+| Noise | Input STOI | Old default (strength 1.0) | New default |
+|---|---|---|---|
+| white 0 dB | 0.512 | 0.634 / 41.3% / 16.0 dB | 0.613 / 0.1% / 9.1 dB |
+| white 10 dB | 0.725 | 0.734 / 33.7% / 31.7 dB | 0.755 / 1.9% / 20.2 dB |
+| pink 0 dB | 0.518 | 0.632 / 41.0% / 28.7 dB | 0.614 / 0.9% / 15.7 dB |
+| pink 10 dB | 0.721 | 0.741 / 31.9% / 48.6 dB | 0.753 / 1.1% / 26.4 dB |
+
+Trade-off: no more cutting, and intelligibility is higher at moderate noise, but more
+residual background noise is left (contrast is lower). At extreme noise (0 dB) STOI
+is ~0.02 lower than full suppression.
+
+**Next quality step:** DeepFilterNet3 (MIT/Apache, has a C API with an attenuation
+limit). Building it here was blocked: it compiles and runs third-party Rust code
+downloaded from crates.io, which needs your explicit approval.
