@@ -301,3 +301,46 @@ def test_relay_unreachable_agent(client: Any) -> None:
         ws.receive_json()
         _msgs, _, close = drain(ws)
     assert close == 4502
+
+
+def test_agent_audio_reference_prevents_echo_barge_in(client: Any) -> None:
+    """The agent's own voice coming back (speakerphone echo) is not an interruption."""
+    import base64
+
+    import numpy as np
+
+    _, key = new_org(client)
+    agent = np.frombuffer(speech_pcm16(pad_s=0.0), np.int16).astype(np.float32)
+    delay = int(0.12 * 16000)  # 120 ms acoustic + network path
+    echo = 0.5 * np.concatenate([np.zeros(delay, np.float32), agent])[: len(agent)]
+    rng = np.random.default_rng(0)
+    mic = (echo + 30 * rng.standard_normal(len(agent))).astype(np.int16).tobytes()
+    ref = agent.astype(np.int16).tobytes()
+
+    def run(with_reference: bool) -> list[str]:
+        with client.websocket_connect("/v1/stream", headers=bearer(key)) as ws:
+            ws.receive_json()
+            if not with_reference:
+                ws.send_text(json.dumps({"type": "agent_speaking", "value": True}))
+            for i in range(0, len(mic), 640):
+                if with_reference:
+                    chunk = base64.b64encode(ref[i : i + 640]).decode()
+                    ws.send_text(json.dumps({"type": "agent_audio", "data": chunk}))
+                ws.send_bytes(mic[i : i + 640])
+            ws.send_text(json.dumps({"type": "end"}))
+            msgs, _, code = drain(ws)
+        assert code == 1000
+        return [m["type"] for m in msgs]
+
+    assert "interruption" in run(with_reference=False)  # the problem
+    types = run(with_reference=True)
+    assert "interruption" not in types and types[-1] == "session.ended"
+
+
+def test_agent_audio_must_be_base64(client: Any) -> None:
+    _, key = new_org(client)
+    with client.websocket_connect("/v1/stream", headers=bearer(key)) as ws:
+        ws.receive_json()
+        ws.send_text(json.dumps({"type": "agent_audio", "data": "not base64!"}))
+        err = ws.receive_json()
+    assert err["type"] == "error" and "base64" in err["message"]

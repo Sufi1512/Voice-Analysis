@@ -97,6 +97,18 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
+## WebRTC AudioProcessing / AEC3 (bundled binary `_native/linux-x86_64/libnexora_aec.so`)
+
+WebRTC AudioProcessing v2.1 (PulseAudio's standalone build), used for echo cancellation.
+Copyright (c) 2011, Google Inc. All rights reserved. BSD-3-Clause: full text in
+`_native/licenses/webrtc-COPYING.txt`; Google's additional patent grant in
+`_native/licenses/webrtc-PATENTS.txt`.
+
+## Abseil (compiled into `libnexora_aec.so`)
+
+Abseil C++ `20240722.0`, Copyright The Abseil Authors. Apache License 2.0: full text in
+`_native/licenses/abseil-LICENSE.txt`. Unmodified.
+
 ## onnxruntime (dependency, MIT)
 
 ## Optional dependencies (installed separately, not bundled)

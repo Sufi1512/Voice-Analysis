@@ -28,10 +28,7 @@ _NOT_YET: dict[str, str] = {
         "no permissively licensed voice-isolation model is available "
         "(see docs/DEPENDENCY_LICENSES.md)"
     ),
-    "echo_cancellation": (
-        "no echo-cancellation backend is installable for this Python version "
-        "(see docs/DEPENDENCY_LICENSES.md)"
-    ),
+    "echo_cancellation": "the bundled WebRTC AEC3 library (libnexora_aec) is not available here",
     "voice_enhancement": "no voice-enhancement backend is installed",
     "auto_gain_control": "no gain-control backend is installed or implemented yet",
     "vad": "no voice-activity-detection backend is installed or implemented yet",

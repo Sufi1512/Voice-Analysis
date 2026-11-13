@@ -107,6 +107,7 @@ phase = "E4"
 
 [[gate]]
 id = "false_barge_echo"
+enforce = true
 title = "False barge-ins on echo-only audio (count)"
 metric = "false_barge_ins"
 sets = ["echo"]

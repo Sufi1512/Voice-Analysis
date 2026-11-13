@@ -17,7 +17,12 @@ CHUNK_MS = 20
 
 
 def process(case: Case, settings: dict[str, Any]) -> dict[str, Any]:
-    """Stream the case through a StreamSession in 20 ms chunks, as a live call would."""
+    """Stream the case through a StreamSession in 20 ms chunks, as a live call would.
+
+    Echo cases run with echo cancellation on (what a speakerphone deployment uses) unless
+    the run overrides ``echo_cancellation``; the agent audio is pushed as the reference."""
+    if case.set == "echo" and "echo_cancellation" not in settings:
+        settings = {**settings, "echo_cancellation": True}
     fmt = AudioFormat(encoding=case.encoding, sample_rate=case.rate)  # type: ignore[arg-type]
     wire = encode(case.mic[None, :], fmt)
     step = fmt.bytes_for_ms(CHUNK_MS)
@@ -25,13 +30,23 @@ def process(case: Case, settings: dict[str, Any]) -> dict[str, Any]:
     out = bytearray()
     events: list[dict[str, Any]] = []
     times: list[float] = []
+    ref_fmt = AudioFormat(encoding="float32", sample_rate=case.rate)
     with StreamSession(input_format=fmt, **settings) as sess:
         latency_ms = sess.latency_ms
         speaking = False
         for k, i in enumerate(range(0, len(wire), step)):
             t = k * chunk_s
             now = any(s <= t < e for s, e in case.agent_spans)
-            if now != speaking:
+            if case.reference is not None:
+                # the agent audio the server sends to the caller, in real time
+                n = len(case.reference)
+                a, b = (
+                    min(n, k * step // fmt.bytes_per_frame),
+                    min(n, (k + 1) * step // fmt.bytes_per_frame),
+                )
+                if b > a:
+                    sess.push_reference(encode(case.reference[None, a:b], ref_fmt), ref_fmt)
+            elif now != speaking:
                 sess.set_agent_speaking(now)
                 speaking = now
             t0 = time.perf_counter()
@@ -126,9 +141,15 @@ def measure(case: Case, settings: dict[str, Any], use_stt: bool) -> dict[str, An
             row["false_barge_ins"] = len(interruptions)
         else:
             s0, s1 = case.speech_span
-            hit = [e for e in interruptions if s0 <= e["time_ms"] / 1000 - lat_s <= s0 + 1.5]
+            # reported within 1.5 s of the caller starting (2 s for an early interruption,
+            # while the echo path is still being learned)
+            limit = 1.5 if s0 >= 3.0 else 2.0
+            hit = [e for e in interruptions if s0 <= e["time_ms"] / 1000 - lat_s <= s0 + limit]
             early = [e for e in interruptions if e["time_ms"] / 1000 - lat_s < s0]
             row["missed_barge_in"] = int(not hit)
+            row["barge_in_delay_ms"] = (
+                round((hit[0]["time_ms"] / 1000 - lat_s - s0) * 1000) if hit else None
+            )
             row["false_barge_ins"] = len(early)
             nz = (case.echo if case.echo is not None else 0) + (
                 case.noise if case.noise is not None else 0

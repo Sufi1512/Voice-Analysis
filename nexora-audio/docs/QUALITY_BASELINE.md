@@ -77,9 +77,9 @@ level rose from −31 to −24 dBFS, on airport announcements). That is phase E3
 | Noise in pauses, 0–20 dB SNR, worst case | ≤ −60 dB | −2.5 dB | E3 |
 | Loudest noise left in pauses | ≤ −70 dBFS | −24 dBFS | E3 |
 | Noise pumping, worst case | ≤ 3 dB | 21 dB | E3 |
-| Echo removed (ERLE), worst case | ≥ 30 dB | 0.2 dB | E4 |
-| False barge-ins on echo-only audio | 0 | 6 of 6 cases | E4 |
-| Missed barge-ins in double-talk | ≤ 2% | 100% | E4 |
+| Echo removed (ERLE), worst case | ≥ 30 dB | 0.2 dB (14.4 after E4, median 26.9) | E4 |
+| False barge-ins on echo-only audio | 0 | 6 of 6 cases (0 after E4: pass) | E4 |
+| Missed barge-ins in double-talk | ≤ 2% | 100% (18.75% after E4) | E4 |
 | Caller speech cut while the agent talks | ≤ 3% | 0.7% | pass |
 | Mid-sentence pauses taken as end of turn | ≤ 3% | 88% | E5 |
 | Reply gap, median | ≤ 800 ms | 704 ms | pass (enforced) |
@@ -122,6 +122,24 @@ target, so 10% loss and some 5% patterns remain E3 work (longer gaps fade out by
 The transcription gates are now reported without a baseline check: the first GitHub run
 showed Whisper's output differs between CPU types (noisy-speech WER gain 4.9% there vs
 14.3% here), while every other metric matched exactly.
+
+## Update after E4 (2026-11-14)
+
+E4 (`E4_SPEC.md`): echo reference, echo-aware barge-in and the WebRTC AEC3 canceller. The
+echo set grew to 28 cases (adds 400 ms delay, echo 6 dB louder than the caller, headsets,
+and interruptions in the agent's first second). Echo cases now run with
+`echo_cancellation=True`. Report: `docs/quality/report-full-2026-11-14-e4.md`.
+
+| Echo gate | Before E4 | After E4 |
+| --- | --- | --- |
+| False barge-ins on echo-only audio | 6 of 6 cases | **0** (now enforced) |
+| Missed barge-ins in double-talk | 100% | 18.75% (3 of 16, all with echo louder than the caller) |
+| Echo removed, worst case | 0.2 dB | 14.4 dB (median 26.9 dB) |
+| Caller speech cut while both talk, worst case | 1.2% | 42% (interruption in the agent's first second; median 8.2%) |
+
+The last row is a deliberate trade-off, accepted into the baseline: removing the agent's
+echo costs some caller audio while both talk, mostly before the canceller has adapted.
+No other gate changed.
 
 ## Known limits of this baseline
 

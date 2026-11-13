@@ -171,27 +171,33 @@ def echo_case(
     clip_near: str | None,
     near: np.ndarray | None,
     delay_ms: float,
-    echo_db: float,
+    echo_db: float | None,
+    interrupt_s: float = 3.5,
 ) -> Case:
-    """Agent talks from 1.0 s; with ``near`` the caller starts talking 2.5 s into it."""
+    """Agent talks from 1.0 s; with ``near`` the caller starts talking at ``interrupt_s``.
+    ``echo_db=None``: no echo at all (a headset, or a device that cancels it)."""
     ref = np.concatenate([np.zeros(RATE), _level(agent), np.zeros(int(2.5 * RATE))])
     n = len(ref)
     agent_span = (1.0, 1.0 + len(agent) / RATE)
     echo = synth.echo_path(ref, RATE, delay_ms, seed_of(clip_agent, delay_ms))
-    echo = echo * np.sqrt(10 ** ((SPEECH_DBFS + echo_db) / 10) / synth.active_power(echo))
+    if echo_db is None:
+        echo = np.zeros_like(echo)
+    else:
+        echo = echo * np.sqrt(10 ** ((SPEECH_DBFS + echo_db) / 10) / synth.active_power(echo))
     clean = np.zeros(n, np.float32)
     span = (0.0, 0.0)
     kind = "single"
     if near is not None:
         kind = "double"
-        start = int(3.5 * RATE)
+        start = int(interrupt_s * RATE)
         seg = _level(near)[: n - start - RATE // 2]
         clean[start : start + len(seg)] = seg
         span = (start / RATE, (start + len(seg)) / RATE)
     floor = synth.scale_to_snr(_level(agent), _noise("pink", n, seed_of("echo", clip_agent)), 45)
     mic = (clean + echo + floor).astype(np.float32)
     return Case(
-        f"echo/{kind}/{delay_ms:g}ms/{echo_db:+g}dB/{clip_agent}",
+        f"echo/{kind}/{delay_ms:g}ms/{'none' if echo_db is None else f'{echo_db:+g}dB'}"
+        f"{'' if interrupt_s == 3.5 else f'/at{interrupt_s:g}s'}/{clip_agent}",
         "echo",
         RATE,
         mic,
@@ -286,6 +292,7 @@ def build(profile: str) -> Iterator[Case]:
         yield from loss_cases(clip(4), clips[clip(4)], 5)
         yield echo_case(clip(5), clips[clip(5)], None, None, 120, 0)
         yield echo_case(clip(6), clips[clip(6)], clip(7), clips[clip(7)], 120, 0)
+        yield echo_case(clip(9), clips[clip(9)], clip(10), clips[clip(10)], 0, None)
         yield turn_case(clip(8), clips[clip(8)], [500, 900])
         return
     if profile != "full":
@@ -311,12 +318,18 @@ def build(profile: str) -> Iterator[Case]:
             c = clip(i * 2 + j + 11)
             yield from loss_cases(c, clips[c], pct)
     e = 0
-    for delay in (40, 120, 250):
-        for edb in (0, -10):
+    for delay in (40, 120, 250, 400):
+        for edb in (6, 0, -10):
             a, b = clip(e + 5), clip(e + 6)
             yield echo_case(a, clips[a], None, None, delay, edb)
             yield echo_case(a, clips[a], b, clips[b], delay, edb)
             e += 2
+    for i in range(2):  # headset: no echo, the caller must still be able to interrupt
+        a, b = clip(i + 3), clip(i + 4)
+        yield echo_case(a, clips[a], b, clips[b], 0, None)
+    for i, edb in enumerate((0, -10)):  # interrupting in the agent's first second
+        a, b = clip(i + 9), clip(i + 10)
+        yield echo_case(a, clips[a], b, clips[b], 120, edb, interrupt_s=1.6)
     plans = [[400, 800], [600, 1000], [500, 1200], [700, 900]]
     for i in range(8):
         c = clip(i + 13)

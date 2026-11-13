@@ -14,7 +14,14 @@ binary message, input only), ``sample_rate``, ``channels``,
 Auth: ``Authorization: Bearer <API key>`` with the ``stream`` scope, or ``token=<session token>``.
 
 Client control messages (JSON text): ``{"type": "agent_speaking", "value": true}``,
-``{"type": "flush"}``, ``{"type": "reset"}``, ``{"type": "end"}``, ``{"type": "ping"}``.
+``{"type": "agent_audio", "data": "<base64>"}`` (the agent audio just played to the caller,
+in the stream's input format: the echo reference), ``{"type": "flush"}``, ``{"type": "reset"}``,
+``{"type": "end"}``, ``{"type": "ping"}``.
+
+Echo: in Relay mode the agent audio the server forwards to the caller is used as the echo
+reference automatically; in Process mode send it with ``agent_audio``. With a reference,
+the agent's own voice coming back is not reported as the caller speaking or interrupting,
+and a profile with ``echo_cancellation: true`` also removes it from the audio.
 
 Server messages: binary audio; JSON ``session.started``, turn events (``speech_start``,
 ``speech_end``, ``end_of_turn``, ``interruption``, ``backchannel``), ``pong``,
@@ -24,6 +31,7 @@ Server messages: binary audio; JSON ``session.started``, turn events (``speech_s
 from __future__ import annotations
 
 import asyncio
+import base64
 import contextlib
 import json
 import logging
@@ -375,6 +383,20 @@ async def _control(run: _Run, text: str) -> tuple[str, dict[str, Any] | None]:
     if kind == "agent_speaking":
         run.session.set_agent_speaking(bool(msg.get("value")))
         return "ok", None
+    if kind == "agent_audio":
+        try:
+            ref = base64.b64decode(str(msg.get("data", "")), validate=True)
+        except (ValueError, TypeError):
+            return "error", {
+                "type": "error",
+                "code": 4400,
+                "message": "agent_audio.data must be base64",
+            }
+        if not run.fmt.packetized:
+            await asyncio.get_running_loop().run_in_executor(
+                None, run.session.push_reference, ref, run.fmt
+            )
+        return "ok", None
     if kind == "ping":
         return "ok", {"type": "pong", "audio_seconds": round(run.audio_s, 3)}
     if kind in ("flush", "end", "reset"):
@@ -493,6 +515,10 @@ async def _relay_loop(
                 if isinstance(msg, bytes):
                     last_agent_audio[0] = time.monotonic()
                     run.session.set_agent_speaking(True)
+                    if not run.fmt.packetized:  # the agent audio is the echo reference
+                        await asyncio.get_running_loop().run_in_executor(
+                            None, run.session.push_reference, msg, run.fmt
+                        )
                     if ws.application_state == WebSocketState.CONNECTED:
                         await ws.send_bytes(msg)
                 else:

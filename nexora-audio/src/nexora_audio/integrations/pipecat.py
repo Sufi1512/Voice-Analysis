@@ -81,6 +81,16 @@ class NexoraAudioFilter(BaseAudioFilter):
             out = self._session.process(audio)
         return out.audio
 
+    def push_reference(self, audio: bytes) -> None:
+        """Agent audio (16-bit mono PCM at the transport rate) just sent to the caller.
+
+        Pipecat input filters do not see output audio, so call this from a frame processor
+        on the output side (e.g. on ``OutputAudioRawFrame``). With a reference, the agent's
+        own voice coming back is recognised; with ``echo_cancellation=True`` it is also
+        removed from the caller's audio."""
+        if self._session is not None and audio:
+            self._session.push_reference(audio)
+
     def quality(self) -> dict[str, Any]:
         """Live quality numbers for this call (empty before ``start``)."""
         return self._session.quality() if self._session is not None else {}

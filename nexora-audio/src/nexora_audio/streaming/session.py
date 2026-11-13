@@ -26,12 +26,14 @@ from typing import Any, Self
 import numpy as np
 from pydantic import ValidationError
 
+from nexora_audio.backends.aec3 import AEC3Processor
 from nexora_audio.client import NexoraAudio
 from nexora_audio.config import NexoraConfig
 from nexora_audio.core.capabilities import BackendRegistry
 from nexora_audio.core.resampler import StreamingResampler
 from nexora_audio.exceptions import ConfigurationError
 from nexora_audio.streaming.codecs import SILENCE_LEVEL, AudioFormat, StreamDecoder, encode
+from nexora_audio.streaming.echo import EchoGate, ReferenceTimeline
 from nexora_audio.streaming.plc import LossConcealer
 from nexora_audio.streaming.quality import QualityMonitor
 from nexora_audio.streaming.turns import TurnConfig, TurnEvent, TurnTracker
@@ -110,6 +112,18 @@ class StreamSession:
             else None
         )
         self._monitor = QualityMonitor(rate)
+        # echo: the agent audio sent to the caller, on the caller-audio timeline
+        self._pos = 0  # caller-audio samples received (incl. concealed)
+        self._timeline = ReferenceTimeline(rate)
+        self._gate = EchoGate(rate)
+        self._hop = self._gate.hop
+        self._hop_buf = np.zeros(0, np.float32)
+        self._ref_decoders: dict[AudioFormat, StreamDecoder] = {}
+        self._ref_resamplers: dict[tuple[int, int], StreamingResampler] = {}
+        self._aec: AEC3Processor | None = next(
+            (p for p in self._pipeline.processors if isinstance(p, AEC3Processor)), None
+        )
+        self._agent_auto = False
         self._lock = threading.Lock()
         self._latency_ms = self._pipeline.latency.algorithmic_ms
         self.timing = TimingStats()
@@ -150,6 +164,63 @@ class StreamSession:
                     planar = self._plc.process(planar[0])[None, :]
             return self._run(planar, t0)
 
+    def push_reference(self, data: bytes, fmt: AudioFormat | None = None) -> None:
+        """Agent audio just sent to the caller (default format: this session's output).
+
+        Enables echo-aware turn events (the agent's own voice coming back is not reported
+        as the caller speaking or interrupting) and, when ``echo_cancellation=True``, feeds
+        the echo canceller. While reference audio is still playing, the session treats the
+        agent as speaking (audible agent audio in the last 300 ms); :meth:`set_agent_speaking`
+        is then not needed.
+        """
+        fmt = fmt or self.output_format
+        with self._lock:
+            self._check_open()
+            dec = self._ref_decoders.get(fmt)
+            if dec is None:
+                dec = self._ref_decoders[fmt] = StreamDecoder(fmt)
+            x = dec.decode(data)
+            if not x.shape[1]:
+                return
+            mono = x.mean(axis=0) if x.shape[0] > 1 else x[0]
+            mono = self._resample(mono, fmt.sample_rate, self.input_format.sample_rate)
+            self._timeline.push(mono, self._pos)
+            self._agent_auto = True
+            if self._aec is not None:
+                rate = self._aec.native_sample_rate
+                self._aec.push_reference(
+                    self._resample(mono, self.input_format.sample_rate, rate, "aec")
+                )
+
+    def _resample(self, x: Float32Array, src: int, dst: int, tag: str = "ref") -> Float32Array:
+        if src == dst:
+            return x
+        key = (src, dst) if tag == "ref" else (-src, -dst)
+        rs = self._ref_resamplers.get(key)
+        if rs is None:
+            rs = self._ref_resamplers[key] = StreamingResampler(src, dst, 1)
+        out: Float32Array = rs.process(x[None, :])[0]
+        return out
+
+    def _track_echo(self, mono: Float32Array) -> None:
+        """Feed the echo gate in 10 ms hops and follow whether the agent is still playing."""
+        buf = np.concatenate([self._hop_buf, mono]) if len(self._hop_buf) else mono
+        h = self._hop
+        m = len(buf) // h
+        start = self._pos - len(self._hop_buf)
+        for i in range(m):
+            seg = buf[i * h : (i + 1) * h]
+            self._gate.update(seg, self._timeline.get(start + i * h, h))
+        self._hop_buf = buf[m * h :].copy()
+        self._pos += len(mono)
+        if self._agent_auto and self._turns is not None:
+            # the agent is speaking while its audio was audible in the last 300 ms
+            win = int(0.3 * self.input_format.sample_rate)
+            recent = self._timeline.get(self._pos - win, win)
+            playing = float(np.mean(recent.astype(np.float64) ** 2)) > 1e-6  # -60 dBFS
+            if playing != self._turns.agent_speaking:
+                self._turns.set_agent_speaking(playing)
+
     def conceal(self, ms: float) -> SessionOutput:
         """The transport knows ``ms`` of audio is missing (and sent nothing for it):
         produce concealment audio for that span, so the output stays time-aligned."""
@@ -165,6 +236,8 @@ class StreamSession:
             return self._run(planar, t0)
 
     def _run(self, planar: Float32Array, t0: float) -> SessionOutput:
+        if planar.shape[1]:
+            self._track_echo(planar.mean(axis=0) if planar.shape[0] > 1 else planar[0])
         out = self._pipeline.process(planar) if planar.shape[1] else planar
         events = self._collect_events()
         audio = self._encode(out)
@@ -197,6 +270,13 @@ class StreamSession:
             q["chunk_p50_ms"] = round(self.timing.p50_ms, 3)
             q["chunk_p99_ms"] = round(self.timing.p99_ms, 3)
         q["latency_ms"] = round(self.latency_ms, 2)
+        if self._agent_auto:
+            q["echo_delay_ms"] = (
+                round(self._gate.delay_hops * 10.0, 1) if self._gate.delay_hops >= 0 else None
+            )
+            q["echo_windows_ignored"] = self._gate.echo_hops
+        if self._aec is not None:
+            q["aec"] = self._aec.stats()
         return q
 
     async def aprocess(self, data: bytes) -> SessionOutput:
@@ -233,6 +313,10 @@ class StreamSession:
             if self._plc is not None:
                 self._plc.reset()
             self._monitor.reset()
+            self._timeline.reset()
+            self._gate.reset()
+            self._pos, self._agent_auto = 0, False
+            self._hop_buf = np.zeros(0, np.float32)
             self.timing.reset()
 
     def close(self) -> None:
@@ -281,7 +365,12 @@ class StreamSession:
                 continue
             # VAD sees processed audio; shift times back onto the input timeline
             t_ms = r.start_sample * 1000.0 / rate - self._latency_ms
-            events.extend(self._turns.update(max(t_ms, 0.0), float(r.values["probability"])))
+            p = float(r.values["probability"])
+            # Silero windows are 32 ms
+            agent = self._turns.agent_speaking
+            if p >= 0.35 and self._agent_auto and self._gate.is_echo(t_ms / 1000, 0.032, agent):
+                p = 0.0  # the agent's own voice coming back: not the caller speaking
+            events.extend(self._turns.update(max(t_ms, 0.0), p))
         return events
 
 

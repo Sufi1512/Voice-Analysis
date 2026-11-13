@@ -190,3 +190,15 @@ packet loss) against quality gates: `python -m qualitylab run --profile fast`. S
   audio input filter (`pip install "nexora-audio[pipecat]"`). For Dograh, see
   `../integrations/dograh/`.
 
+## Echo (speakerphones, kiosks, cars, BYO WebSocket)
+Give the session the agent audio you send to the caller, and the agent's own voice coming
+back is no longer reported as the caller speaking or interrupting:
+
+```python
+session.push_reference(agent_audio_bytes)        # same format as the session's output
+session = StreamSession(..., echo_cancellation=True)  # also remove it (WebRTC AEC3)
+```
+
+nexora-server does this automatically in Relay mode; in Process mode send
+`{"type": "agent_audio", "data": "<base64>"}`. Results and limits: `docs/E4_SPEC.md`.
+
