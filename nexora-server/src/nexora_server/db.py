@@ -86,6 +86,8 @@ class SessionRecord(Base):
     audio_seconds: Mapped[float] = mapped_column(Float, default=0.0)
     event_counts: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     p99_processing_ms: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # per-call audio quality at the end of the session (StreamSession.quality())
+    quality: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     close_code: Mapped[int | None] = mapped_column(Integer, nullable=True)
     close_reason: Mapped[str | None] = mapped_column(String(200), nullable=True)
     started_at: Mapped[datetime] = mapped_column(

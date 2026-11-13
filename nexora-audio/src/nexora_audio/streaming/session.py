@@ -31,7 +31,9 @@ from nexora_audio.config import NexoraConfig
 from nexora_audio.core.capabilities import BackendRegistry
 from nexora_audio.core.resampler import StreamingResampler
 from nexora_audio.exceptions import ConfigurationError
-from nexora_audio.streaming.codecs import AudioFormat, StreamDecoder, encode
+from nexora_audio.streaming.codecs import SILENCE_LEVEL, AudioFormat, StreamDecoder, encode
+from nexora_audio.streaming.plc import LossConcealer
+from nexora_audio.streaming.quality import QualityMonitor
 from nexora_audio.streaming.turns import TurnConfig, TurnEvent, TurnTracker
 from nexora_audio.utils.audio_utils import Float32Array
 from nexora_audio.utils.metrics import TimingStats
@@ -50,8 +52,11 @@ class StreamSession:
         config: Processing settings (``sample_rate`` and ``channels`` are taken from
             ``input_format``). Keyword settings can be used instead.
         input_format: Wire format of incoming bytes.
-        output_format: Wire format of returned bytes (default: same as input).
+        output_format: Wire format of returned bytes (default: same as input; PCM16 at
+            the same rate when the input is Opus).
         turns: Turn/interruption settings, or ``None`` to disable turn events.
+        loss_concealment: Conceal lost packets that arrive as digital silence, and enable
+            :meth:`conceal` (mono streams).
     """
 
     def __init__(
@@ -61,11 +66,19 @@ class StreamSession:
         input_format: AudioFormat | None = None,
         output_format: AudioFormat | None = None,
         turns: TurnConfig | None = TurnConfig(),  # noqa: B008 - immutable dataclass
+        loss_concealment: bool = True,
         registry: BackendRegistry | None = None,
         **settings: Any,
     ) -> None:
         self.input_format = input_format or AudioFormat()
-        self.output_format = output_format or self.input_format
+        default_out = (
+            AudioFormat("pcm16", self.input_format.sample_rate, self.input_format.channels)
+            if self.input_format.packetized
+            else self.input_format
+        )
+        self.output_format = output_format or default_out
+        if self.output_format.packetized:
+            raise ConfigurationError("Opus output is not supported: use pcm16, float32 or G.711")
         if self.output_format.channels != self.input_format.channels:
             raise ConfigurationError("input and output must have the same channel count")
         if config is not None and settings:
@@ -90,6 +103,13 @@ class StreamSession:
             StreamingResampler(rin, rout, self.input_format.channels) if rin != rout else None
         )
         self._turns = TurnTracker(turns) if turns is not None else None
+        rate = self.input_format.sample_rate
+        self._plc = (
+            LossConcealer(rate, SILENCE_LEVEL[self.input_format.encoding])
+            if loss_concealment and self.input_format.channels == 1
+            else None
+        )
+        self._monitor = QualityMonitor(rate)
         self._lock = threading.Lock()
         self._latency_ms = self._pipeline.latency.algorithmic_ms
         self.timing = TimingStats()
@@ -124,11 +144,60 @@ class StreamSession:
             self._check_open()
             t0 = time.perf_counter()
             planar = self._decoder.decode(data)
-            out = self._pipeline.process(planar) if planar.shape[1] else planar
-            events = self._collect_events()
-            audio = self._encode(out)
-            self.timing.add(time.perf_counter() - t0)
-            return SessionOutput(audio, events)
+            if planar.shape[1]:
+                self._monitor.update(planar[0])
+                if self._plc is not None:
+                    planar = self._plc.process(planar[0])[None, :]
+            return self._run(planar, t0)
+
+    def conceal(self, ms: float) -> SessionOutput:
+        """The transport knows ``ms`` of audio is missing (and sent nothing for it):
+        produce concealment audio for that span, so the output stays time-aligned."""
+        with self._lock:
+            self._check_open()
+            t0 = time.perf_counter()
+            n = round(ms * self.input_format.sample_rate / 1000)
+            ch = self.input_format.channels
+            if self._plc is not None:
+                planar = self._plc.conceal(n)[None, :]
+            else:
+                planar = np.zeros((ch, n), np.float32)
+            return self._run(planar, t0)
+
+    def _run(self, planar: Float32Array, t0: float) -> SessionOutput:
+        out = self._pipeline.process(planar) if planar.shape[1] else planar
+        events = self._collect_events()
+        audio = self._encode(out)
+        self.timing.add(time.perf_counter() - t0)
+        return SessionOutput(audio, events)
+
+    @property
+    def input_seconds(self) -> float:
+        """Audio received so far, in seconds (decoded, so it also works for Opus)."""
+        return self._monitor.samples / self.input_format.sample_rate
+
+    def quality(self) -> dict[str, Any]:
+        """Live quality numbers for this call (see :mod:`nexora_audio.streaming.quality`)."""
+        q = self._monitor.summary()
+        rate = self.input_format.sample_rate
+        if self._plc is not None:
+            q["concealed_ms"] = round(1000 * self._plc.concealed_samples / rate, 1)
+            q["concealed_pct"] = (
+                round(100 * self._plc.concealed_samples / self._monitor.samples, 2)
+                if self._monitor.samples
+                else 0.0
+            )
+            q["loss_events"] = self._plc.events
+        guard = sum(
+            getattr(p, "guard_restored_frames", 0)
+            for p in getattr(self._pipeline, "processors", [])
+        )
+        q["guard_restored_frames"] = guard
+        if self.timing.count:
+            q["chunk_p50_ms"] = round(self.timing.p50_ms, 3)
+            q["chunk_p99_ms"] = round(self.timing.p99_ms, 3)
+        q["latency_ms"] = round(self.latency_ms, 2)
+        return q
 
     async def aprocess(self, data: bytes) -> SessionOutput:
         """Async version of :meth:`process`: runs in a worker thread so the event loop
@@ -161,6 +230,9 @@ class StreamSession:
                 self._out_rs.reset()
             if self._turns is not None:
                 self._turns.reset()
+            if self._plc is not None:
+                self._plc.reset()
+            self._monitor.reset()
             self.timing.reset()
 
     def close(self) -> None:

@@ -86,7 +86,7 @@ level rose from −31 to −24 dBFS, on airport announcements). That is phase E3
 | Added delay | ≤ 40 ms | 34 ms | pass (enforced) |
 | Reported delay matches measured | ≤ 5 ms error | 0.06 ms | pass (enforced) |
 | Processing per 20 ms chunk, p99 | ≤ 10 ms | 11 ms with 2 workers sharing 2 CPUs (7–8 ms alone) | E4 |
-| Intelligibility lost to 5% packet loss | ≤ 0.05 STOI | 0.09 | E2 |
+| Intelligibility lost to 5% packet loss | ≤ 0.05 STOI | 0.09 (0.039 after E2: pass) | E2 |
 
 What the numbers say, in plain words:
 
@@ -102,6 +102,26 @@ What the numbers say, in plain words:
   inserted at natural word gaps, so the real silence is a little longer than the inserted
   pause; treat 88% as an upper bound. Phase E5.
 - **Packet loss**: gaps arrive as silence and cost up to 0.09 STOI at 5% loss. Concealment is phase E2.
+
+## Update after E2 (same day)
+
+E2 (`E2_SPEC.md`) added packet-loss concealment, Opus input, per-call quality numbers and
+the Dograh engine. Full-profile re-run (`docs/quality/report-full-2026-11-13-e2.md`):
+no gate got worse, and the packet-loss gate now passes.
+
+| Packet loss (paired with the loss-free twin) | Before (worst STOI drop) | After |
+| --- | --- | --- |
+| 1% | 0.043 | 0.031 |
+| 3% | 0.077 | 0.038 |
+| 5% (gate ≤ 0.05) | 0.092 | **0.039** |
+| 10% | 0.135 | 0.066 |
+
+The single 5% case in the fast profile went from 0.108 to 0.070: better, still above
+target, so 10% loss and some 5% patterns remain E3 work (longer gaps fade out by design).
+
+The transcription gates are now reported without a baseline check: the first GitHub run
+showed Whisper's output differs between CPU types (noisy-speech WER gain 4.9% there vs
+14.3% here), while every other metric matched exactly.
 
 ## Known limits of this baseline
 

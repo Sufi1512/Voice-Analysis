@@ -175,3 +175,18 @@ and `src/nexora_audio/_native/PROVENANCE.md`. Dependency review:
 Every audio change is measured on a 242-case test corpus (noise, phone, reverb, echo, turns,
 packet loss) against quality gates: `python -m qualitylab run --profile fast`. See
 `docs/QUALITY_BASELINE.md` and `docs/VOICE_QUALITY_PLAN.md`.
+
+## Live calls: lost packets, Opus, quality numbers, Pipecat/Dograh
+- **Lost packets**: gaps that arrive as digital silence (what jitter buffers and gateways
+  insert) are concealed G.711-Appendix-I style: pitch repetition, fading out over 60 ms.
+  If the transport knows audio is missing, call `session.conceal(ms)`.
+  `StreamSession(loss_concealment=False)` turns it off.
+- **Opus input**: `AudioFormat("opus", 16000)`, one packet per `process()` call, `b""` for
+  a lost packet. Output is PCM16 (or float32/G.711). Needs the system `libopus`
+  (`apt install libopus0`).
+- **Per-call quality**: `session.quality()` gives speech level, noise floor, SNR, clipping,
+  concealed audio, speech-guard restorations, processing time and delay.
+- **Pipecat / Dograh**: `nexora_audio.integrations.pipecat.NexoraAudioFilter` is a Pipecat
+  audio input filter (`pip install "nexora-audio[pipecat]"`). For Dograh, see
+  `../integrations/dograh/`.
+

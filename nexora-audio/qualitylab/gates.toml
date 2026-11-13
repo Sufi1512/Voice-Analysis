@@ -43,6 +43,7 @@ op = "<="
 threshold = 0.5
 tolerance = 0.5
 phase = "E3"
+regress = false  # STT output varies with the CPU (int8 kernels): no cross-machine baseline
 
 [[gate]]
 id = "wer_noisy"
@@ -55,6 +56,7 @@ op = ">="
 threshold = 20.0
 tolerance = 3.0
 phase = "E3"
+regress = false  # STT output varies with the CPU (int8 kernels): no cross-machine baseline
 
 [[gate]]
 id = "pause_noise"

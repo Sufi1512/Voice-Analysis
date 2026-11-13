@@ -52,6 +52,37 @@ def test_process_mode_end_to_end_with_metering(client: Any) -> None:
     metrics = client.get("/metrics").text
     assert 'nexora_sessions_total{mode="process",outcome="ok"} 1.0' in metrics
     assert "nexora_audio_seconds_total" in metrics
+    assert "nexora_session_snr_db_count 1.0" in metrics
+
+    q = ended["quality"]  # per-call quality reported to the client and stored
+    assert q["snr_db"] > 10 and q["concealed_ms"] == 0 and q["latency_ms"] > 0
+    assert sessions[0]["quality"]["snr_db"] == q["snr_db"]
+
+
+def test_opus_input(client: Any) -> None:
+    from nexora_audio.streaming.opus import OpusEncoder, probe
+
+    if probe() is not None:
+        pytest.skip("libopus not installed")
+    import numpy as np
+
+    _, key = new_org(client)
+    pcm = np.frombuffer(speech_pcm16(pad_s=0.5), np.int16).astype(np.float32) / 32768
+    enc = OpusEncoder(16000)
+    packets = [enc.encode(pcm[None, i : i + 320]) for i in range(0, len(pcm) - 320, 320)]
+    with client.websocket_connect(
+        "/v1/stream?encoding=opus&sample_rate=16000", headers=bearer(key)
+    ) as ws:
+        started = ws.receive_json()
+        for p in packets:
+            ws.send_bytes(p)
+        ws.send_text(json.dumps({"type": "end"}))
+        msgs, out, code = drain(ws)
+    assert started["input_format"]["encoding"] == "opus" and code == 1000
+    assert len(out) >= len(packets) * 640  # PCM16 back
+    ended = msgs[-1]
+    assert ended["audio_seconds"] == pytest.approx(len(packets) * 0.02, abs=0.05)
+    assert "end_of_turn" in [m["type"] for m in msgs]
 
 
 def test_telephony_format_and_profile(client: Any) -> None:

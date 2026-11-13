@@ -122,6 +122,7 @@ class SessionOut(BaseModel):
     audio_seconds: float
     event_counts: dict[str, Any]
     p99_processing_ms: float | None
+    quality: dict[str, Any] = {}
     close_code: int | None
     close_reason: str | None
     started_at: datetime

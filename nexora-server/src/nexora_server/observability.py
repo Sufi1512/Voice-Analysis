@@ -37,12 +37,38 @@ class Metrics:
             buckets=(0.0005, 0.001, 0.002, 0.005, 0.01, 0.02, 0.05, 0.1, 0.25),
             registry=r,
         )
+        self.session_snr_db = Histogram(
+            "nexora_session_snr_db",
+            "Estimated input SNR per ended session (speech level minus noise floor)",
+            buckets=(0, 5, 10, 15, 20, 30, 40, 60),
+            registry=r,
+        )
+        self.session_concealed_pct = Histogram(
+            "nexora_session_concealed_percent",
+            "Share of input audio concealed after packet loss, per ended session",
+            buckets=(0, 0.1, 0.5, 1, 2, 5, 10, 20),
+            registry=r,
+        )
+        self.session_clipped_pct = Histogram(
+            "nexora_session_clipped_percent",
+            "Share of clipped input samples, per ended session",
+            buckets=(0, 0.01, 0.1, 0.5, 1, 5),
+            registry=r,
+        )
         self.session_start_seconds = Histogram(
             "nexora_session_start_seconds",
             "Time to get a ready audio session (pool hit or model load)",
             buckets=(0.001, 0.01, 0.05, 0.1, 0.25, 0.5, 1, 2, 5),
             registry=r,
         )
+
+    def observe_quality(self, q: dict[str, Any]) -> None:
+        if "snr_db" in q:
+            self.session_snr_db.observe(q["snr_db"])
+        if "concealed_pct" in q:
+            self.session_concealed_pct.observe(q["concealed_pct"])
+        if "clipped_pct" in q:
+            self.session_clipped_pct.observe(q["clipped_pct"])
 
 
 _RESERVED = set(logging.LogRecord("", 0, "", 0, "", None, None).__dict__) | {"message"}

@@ -8,7 +8,8 @@
     The customer's caller connects here; Nexora forwards cleaned audio and events to the
     customer's agent WebSocket (allowlisted URL) and agent audio back to the caller.
 
-Query parameters: ``encoding`` (pcm16|float32|mulaw|alaw), ``sample_rate``, ``channels``,
+Query parameters: ``encoding`` (pcm16|float32|mulaw|alaw|opus; opus = one packet per
+binary message, input only), ``sample_rate``, ``channels``,
 ``output_encoding``, ``output_sample_rate``, ``profile``, ``target`` (relay), ``token``.
 Auth: ``Authorization: Bearer <API key>`` with the ``stream`` scope, or ``token=<session token>``.
 
@@ -68,7 +69,8 @@ class StreamContext:
 
 
 def _fmt(params: dict[str, str], prefix: str = "", base: AudioFormat | None = None) -> AudioFormat:
-    enc = params.get(f"{prefix}encoding", base.encoding if base else "pcm16")
+    default = base.encoding if base and not base.packetized else "pcm16"
+    enc = params.get(f"{prefix}encoding", default)
     rate = int(params.get(f"{prefix}sample_rate", base.sample_rate if base else 16000))
     ch = int(params.get("channels", base.channels if base else 1))
     return AudioFormat(enc, rate, ch)  # type: ignore[arg-type]
@@ -160,9 +162,13 @@ class _Run:
         self.close_code = 1000
         self.close_reason = "normal"
         self.fmt = ctx.spec.input_format
+        self.quality: dict[str, Any] = {}
 
     def account(self, nbytes: int) -> None:
-        self.audio_s += nbytes / self.fmt.bytes_per_frame / self.fmt.sample_rate
+        if self.fmt.packetized:  # Opus: count decoded audio, not bytes
+            self.audio_s = self.session.input_seconds
+        else:
+            self.audio_s += nbytes / self.fmt.bytes_per_frame / self.fmt.sample_rate
 
 
 @router.websocket("/v1/stream")
@@ -248,6 +254,8 @@ async def _serve(ws: WebSocket, mode: str) -> None:
             metrics.audio_seconds.labels(mode).inc(run.audio_s)
             outcome = "ok" if run.close_code in (1000, 1001) else "error"
             metrics.sessions.labels(mode, outcome).inc()
+            run.quality = run.session.quality()
+            metrics.observe_quality(run.quality)
             await _send_json(
                 ws,
                 {
@@ -257,6 +265,7 @@ async def _serve(ws: WebSocket, mode: str) -> None:
                     "events": dict(run.events),
                     "close_code": run.close_code,
                     "reason": run.close_reason,
+                    "quality": run.quality,
                 },
             )
             if record_id:
@@ -269,6 +278,7 @@ async def _serve(ws: WebSocket, mode: str) -> None:
                     "mode": mode,
                     "audio_seconds": round(run.audio_s, 3),
                     "close_code": run.close_code,
+                    "quality": run.quality,
                 },
             )
             await _close(ws, run.close_code, run.close_reason)
@@ -306,6 +316,7 @@ def _finish_record(db: Database, record_id: str, run: _Run, healthy: bool) -> No
         rec.p99_processing_ms = round(run.session.timing.p99_ms, 3)
         rec.close_code = run.close_code
         rec.close_reason = run.close_reason
+        rec.quality = run.quality
         rec.ended_at = utcnow()
 
 

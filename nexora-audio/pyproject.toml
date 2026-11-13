@@ -31,6 +31,7 @@ io = ["soundfile>=0.12"]
 eval = ["pystoi>=0.4"]
 qualitylab = ["pystoi>=0.4", "soundfile>=0.12", "sherpa-onnx>=1.10"]
 server = ["websockets>=12"]
+pipecat = ["pipecat-ai>=0.0.80"]
 dev = [
   "pytest>=8",
   "ruff>=0.6",
@@ -70,5 +71,5 @@ files = ["src"]
 plugins = ["pydantic.mypy"]
 
 [[tool.mypy.overrides]]
-module = ["soundfile", "sounddevice", "onnxruntime", "websockets"]
+module = ["soundfile", "sounddevice", "onnxruntime", "websockets", "pipecat.*"]
 ignore_missing_imports = true

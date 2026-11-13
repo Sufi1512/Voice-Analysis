@@ -39,7 +39,9 @@ jobs:
           python-version: "3.13"
           cache: pip
       - name: Install
-        run: pip install -e ".[dev,qualitylab]"
+        run: |
+          sudo apt-get install -y --no-install-recommends libopus0
+          pip install -e ".[dev,qualitylab,pipecat]"
       - name: Lint and unit tests
         run: |
           ruff check src tests qualitylab
