@@ -72,7 +72,7 @@ def test_default_chain_output_is_clean_level_and_unclipped() -> None:
     clean = speech(16000)
     noisy = mix(clean, white(len(clean)), 5) * 0.1  # quiet, noisy talker (about -35 dBFS)
     with NexoraAudio(sample_rate=16000, auto_gain_control=True) as a:
-        assert a.backends == ["rnnoise", "voice-enhancer"]
+        assert a.backends == ["deepfilternet3", "voice-enhancer"]
         y = np.concatenate([a.process_chunk(noisy[i : i + 160]) for i in range(0, len(noisy), 160)])
     assert level_db(y[len(y) // 3 :]) > level_db(noisy) + 6  # quiet voice brought up
     assert np.max(np.abs(y)) <= 10 ** (-1 / 20) + 1e-6

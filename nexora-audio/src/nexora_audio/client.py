@@ -19,7 +19,7 @@ from nexora_audio.core.capabilities import (
     default_registry,
 )
 from nexora_audio.core.pipeline import LatencyReport, Pipeline
-from nexora_audio.core.processor import Processor
+from nexora_audio.core.processor import AnalysisResult, Processor
 from nexora_audio.exceptions import (
     AudioFormatError,
     ConfigurationError,
@@ -137,6 +137,11 @@ class NexoraAudio:
         out = self._require_pipeline().flush()
         ref = np.asarray(like) if like is not None else np.zeros((0, self._config.channels))
         return self._like_input(out, ref)
+
+    def pop_results(self) -> list[AnalysisResult]:
+        """Analysis results (e.g. VAD probabilities and speech start/end events) produced
+        since the last call. ``start_sample`` is in the stream's sample timeline."""
+        return self._require_pipeline().pop_results()
 
     def reset(self) -> None:
         """Clear stream state so the next chunk starts a new, unrelated stream."""

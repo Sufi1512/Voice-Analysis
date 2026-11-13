@@ -19,7 +19,7 @@ def run_processor(proc: RNNoiseProcessor, x: np.ndarray) -> np.ndarray:
 
 def test_bundled_library_loads() -> None:
     assert rnnoise.probe() is None
-    caps = NexoraAudio().capabilities()["noise_cancellation"]
+    caps = NexoraAudio(noise_backend="rnnoise").capabilities()["noise_cancellation"]
     assert caps.available and caps.backend == "rnnoise"
 
 

@@ -1,6 +1,13 @@
 # Changelog
 
 ## 0.1.0.dev0 — unreleased
+### Changed (background noise)
+- DeepFilterNet3 noise suppression is now the default backend (RNNoise is the fallback).
+- Speech-gated suppression with Silero VAD: capped while speaking, full removal plus a
+  40 dB gate in pauses. Pauses went from ~15-22 dB below the input noise to 75-97 dB.
+- New `vad` feature (Silero): speech probability and start/end events via `pop_results()`.
+- onnxruntime is now a required dependency.
+
 ### Fixed
 - Speech cutting out in noisy audio: `noise_cancellation_strength` now defaults to 0.85
   (attenuation capped at ~16.5 dB). Speech dropouts went from 32–47% to 0–2% of frames.

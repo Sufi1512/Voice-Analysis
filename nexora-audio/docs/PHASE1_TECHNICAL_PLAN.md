@@ -165,3 +165,40 @@ is ~0.02 lower than full suppression.
 **Next quality step:** DeepFilterNet3 (MIT/Apache, has a C API with an attenuation
 limit). Building it here was blocked: it compiles and runs third-party Rust code
 downloaded from crates.io, which needs your explicit approval.
+
+## 9. Background noise analysis and DeepFilterNet3 (2026-11-13)
+**Report:** background sound still audible. **Analysis** (noise-only regions around the speech):
+- In pauses, ~100% of what was heard came from the 15% original audio re-mixed by the
+  flat 0.85 setting (pink 10 dB: -41.5 dBFS vs RNNoise's own leftover -87.6 dBFS).
+- Under the voice, RNNoise removed only 1-2 dB of noise at 10 dB SNR (coarse band gains).
+- Correction: the earlier dropout metric (frames 10 dB below clean, within 35 dB of peak)
+  mostly counted word tails already buried under the noise. Counting only frames where
+  speech is louder than the noise, every version cut 0-3.4%. The "cutting" heard was
+  most likely noise switching on and off between words (pause-level fluctuation 7.2 dB
+  vs 0.7 dB in the input with full-strength RNNoise).
+
+**Shipped:**
+- DeepFilterNet3 backend (libDF C API built from the official repo, official model),
+  preferred over RNNoise. Measured delay 30 ms, ~1.1 ms per 10 ms frame.
+- Ungated DFN3 lets low-frequency noise bursts through in pauses (pink: -11 to -24 dB)
+  and at an unlimited setting removes quiet speech. Hence speech gating with Silero VAD
+  (MIT, ONNX, bundled): speech -> attenuation cap 20 dB; no speech -> no cap + 40 dB
+  pause gate. RNNoise gets the same speech gating (1.0 in pauses, 0.85 during speech).
+- Public `vad` feature (Silero): probability and speech_start/speech_end events.
+
+Full default chain vs previous version (JFK clip with 2 s noise-only padding, 16 kHz):
+
+| Noise | Version | Pauses vs input noise | Noise under voice | STOI | Audible speech cut |
+|---|---|---|---|---|---|
+| pink 10 dB | previous (RNNoise 0.85 + EQ) | -22.2 dB | -15.4 dB | 0.754 | 3.4% |
+| pink 10 dB | new (DFN3 gated + EQ) | -75.2 dB | -17.1 dB | 0.757 | 2.1% |
+| white 10 dB | previous | -15.2 dB | -14.5 dB | 0.762 | 0.0% |
+| white 10 dB | new | -79.1 dB | -15.0 dB | 0.750 | 1.4% |
+| pink 0 dB | previous | -22.2 dB | -10.9 dB | 0.624 | 0.0% |
+| pink 0 dB | new | -87.7 dB | -12.5 dB | 0.647 | 0.6% |
+| white 0 dB | previous | -15.2 dB | -9.2 dB | 0.620 | 0.0% |
+| white 0 dB | new | -96.5 dB | -10.6 dB | 0.633 | 0.0% |
+
+Limits: noise under the voice is still only 0.5-2 dB lower than before. Removing it further
+risks distorting the voice (higher caps cut more speech). DFN3's binary needs glibc 2.35.
+The wheel is still tagged `py3-none-any` (Phase 9).

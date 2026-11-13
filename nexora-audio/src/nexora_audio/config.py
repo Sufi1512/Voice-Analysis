@@ -8,7 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 SUPPORTED_SAMPLE_RATES: tuple[int, ...] = (8000, 16000, 22050, 24000, 32000, 44100, 48000)
 
-NoiseBackend = Literal["auto", "rnnoise", "webrtc"]
+NoiseBackend = Literal["auto", "deepfilternet3", "rnnoise", "webrtc"]
 
 
 class NexoraConfig(BaseModel):
@@ -29,13 +29,41 @@ class NexoraConfig(BaseModel):
     # Features
     noise_cancellation: bool = True
     noise_cancellation_strength: float = Field(
+        1.0,
+        ge=0.0,
+        le=1.0,
+        description="Suppression when no one is speaking (1.0 = maximum, clean pauses).",
+    )
+    deepfilter_atten_lim_db: float = Field(
+        100.0,
+        gt=0.0,
+        le=100.0,
+        description="DeepFilterNet3 maximum attenuation in pauses, dB (100 = no limit).",
+    )
+    deepfilter_speech_atten_lim_db: float = Field(
+        20.0,
+        gt=0.0,
+        le=100.0,
+        description="DeepFilterNet3 maximum attenuation while speech is present, dB.",
+    )
+    pause_gate_db: float = Field(
+        40.0,
+        ge=0.0,
+        le=80.0,
+        description="Extra attenuation applied when no speech is detected (DeepFilterNet3).",
+    )
+    speech_protection: bool = Field(
+        True,
+        description=(
+            "Use a speech detector (Silero VAD) to suppress less while someone is speaking, "
+            "so quiet words don't cut out. Off = noise_cancellation_strength all the time."
+        ),
+    )
+    speech_protection_strength: float = Field(
         0.85,
         ge=0.0,
         le=1.0,
-        description=(
-            "1.0 = maximum suppression. The default 0.85 caps attenuation at about 16.5 dB, "
-            "which keeps quiet words from cutting out (see docs, section 8)."
-        ),
+        description="Suppression while speech is present (0.85 caps it at ~16.5 dB).",
     )
     noise_backend: NoiseBackend = "auto"
     voice_isolation: bool = False

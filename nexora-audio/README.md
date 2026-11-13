@@ -4,10 +4,10 @@ Real-time audio processing SDK for Python: noise cancellation, voice activity
 detection, gain control and streaming for voice agents, WebRTC, call-center
 and meeting applications.
 
-> **Status: 0.1.0.dev0, Phases 3 and 5 of 9 done.** Noise cancellation (RNNoise),
-> voice enhancement and gain control work for streaming chunks and files.
-> Microphone capture and VAD are not implemented yet. Asking for them raises
-> `FeatureUnavailableError`.
+> **Status: 0.1.0.dev0.** Noise cancellation (DeepFilterNet3, with RNNoise as
+> fallback), speech-gated pause cleaning, voice activity detection (Silero), voice
+> enhancement and gain control work for streaming chunks and files. Microphone
+> capture is not implemented yet.
 > See `docs/PHASE1_TECHNICAL_PLAN.md`.
 
 ## Install (local, not published)
@@ -17,9 +17,11 @@ pip install -e ".[io]"       # from this folder; [io] adds WAV/FLAC file support
 pip install -e ".[dev]"      # tests, ruff, mypy
 ```
 
-Python 3.11+. The RNNoise library is bundled for **Linux x86_64**. On other
-platforms, set `NEXORA_RNNOISE_LIBRARY` to a `librnnoise` built from
-https://github.com/xiph/rnnoise, or install your OS package (`librnnoise0`).
+Python 3.11+. Native libraries are bundled for **Linux x86_64** only:
+DeepFilterNet3 needs glibc 2.35+ (Ubuntu 22.04+), RNNoise runs on almost any Linux.
+`NexoraAudio().capabilities()` shows which backend is used. On other platforms set
+`NEXORA_DEEPFILTER_LIBRARY` and/or `NEXORA_RNNOISE_LIBRARY` (see
+`src/nexora_audio/_native/PROVENANCE.md`).
 
 ## Denoise a file
 
@@ -48,19 +50,33 @@ with NexoraAudio(sample_rate=16000, frame_ms=10) as audio:
 ```
 
 - Chunks that are a multiple of `audio.config.frame_samples` come back at the same size.
-- `audio.latency.algorithmic_ms` gives the added delay: 20 ms at 48 kHz, 22 ms at 16 kHz
-  (RNNoise plus resampling).
+- `audio.latency.algorithmic_ms` gives the added delay: 30 ms with DeepFilterNet3
+  (20 ms with RNNoise), plus ~2 ms of resampling at 16 kHz.
 - `audio.reset()` starts a new, unrelated stream.
 
-## Default processing and tuning
+## How the default processing works
+1. **DeepFilterNet3** removes noise, including noise under the voice (RNNoise if DFN3
+   can't load).
+2. **Silero VAD** runs alongside. While someone speaks, suppression is capped
+   (`deepfilter_speech_atten_lim_db`, 20 dB) so quiet word parts survive. In pauses there
+   is no cap, plus a smooth extra gate (`pause_gate_db`, 40 dB), so pauses are silent.
+   The model's own 30 ms delay lets the gate open before a word reaches the output.
+3. **Voice enhancement**: 80 Hz high-pass, +3 dB clarity at 3 kHz (`clarity_db`),
+   peak limiter at -1 dBFS.
+4. **Gain control** (`auto_gain_control=True`, off by default): slow speech leveler.
+
 | Setting | Default | Effect |
 |---|---|---|
-| `noise_cancellation_strength` | `0.85` | Caps suppression at ~16.5 dB so quiet words never cut out. `1.0` removes more noise but drops weak speech in strong noise |
-| `voice_enhancement` | `True` | 80 Hz high-pass, clarity boost, peak limiter at -1 dBFS (no added delay) |
-| `clarity_db` | `3.0` | Presence boost at 3 kHz (0–9 dB) |
-| `auto_gain_control` | `False` | Slow speech leveler towards `agc_target_dbfs` (-20). Turn on when talker volume varies a lot |
+| `noise_backend` | `"auto"` | `"deepfilternet3"` or `"rnnoise"` to force one |
+| `speech_protection` | `True` | Speech-gated caps/gate as above. `False` = constant suppression |
+| `deepfilter_speech_atten_lim_db` | `20` | Max noise removal while speaking (higher = cleaner but riskier) |
+| `pause_gate_db` | `40` | Extra attenuation in pauses |
+| `noise_cancellation_strength` / `speech_protection_strength` | `1.0` / `0.85` | Same idea for the RNNoise backend |
+| `voice_enhancement`, `clarity_db` | `True`, `3.0` | High-pass + clarity EQ + limiter |
+| `auto_gain_control` | `False` | Level speech towards `agc_target_dbfs` (-20) |
+| `vad` | `False` | Report speech probability and start/end events via `audio.pop_results()` |
 
-Why these defaults: `docs/PHASE1_TECHNICAL_PLAN.md`, section 8.
+Measured results and how the defaults were chosen: `docs/PHASE1_TECHNICAL_PLAN.md`, sections 8 and 9.
 
 ## Check what runs on this machine
 
@@ -70,7 +86,8 @@ for feature, s in NexoraAudio().capabilities().items():
 ```
 
 ## Measured performance (preliminary, Phase 8 will formalise)
-Intel Xeon 2.1 GHz, 2 vCPU, Python 3.13, noisy speech, `process_chunk` timing only:
+DeepFilterNet3: about 1.1 ms per 10 ms frame at 48 kHz (real-time factor ~0.12 per channel).
+RNNoise backend (Intel Xeon 2.1 GHz, 2 vCPU, Python 3.13, `process_chunk` timing only):
 
 | I/O rate | Chunk | p50 | p99 | Real-time factor | Added latency |
 |---|---|---|---|---|---|
@@ -97,6 +114,6 @@ results are not proof of real-world quality.
 - **Model-independent API**: backends plug in through a registry.
 
 ## Licences
-Bundled RNNoise is BSD-3-Clause. See `src/nexora_audio/THIRD_PARTY_NOTICES.md`
+Bundled: DeepFilterNet3 (MIT OR Apache-2.0), RNNoise (BSD-3-Clause), Silero VAD model (MIT). See `src/nexora_audio/THIRD_PARTY_NOTICES.md`
 and `src/nexora_audio/_native/PROVENANCE.md`. Dependency review:
 `docs/DEPENDENCY_LICENSES.md`. The licence for nexora-audio itself has not been chosen yet.

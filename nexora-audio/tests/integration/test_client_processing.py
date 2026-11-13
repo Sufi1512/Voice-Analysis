@@ -1,4 +1,4 @@
-"""End-to-end: NexoraAudio.process_chunk and process_file with the RNNoise backend."""
+"""End-to-end: NexoraAudio.process_chunk and process_file, for each noise backend."""
 
 from pathlib import Path
 
@@ -13,9 +13,12 @@ from tests.audio_fixtures import mix, si_sdr, speech, white
 NC_ONLY = {"voice_enhancement": False, "auto_gain_control": False}
 
 
-@pytest.fixture
-def audio() -> NexoraAudio:
-    a = NexoraAudio(noise_cancellation=True, sample_rate=48000, **NC_ONLY)
+LATENCY_MS = {"deepfilternet3": 30.0, "rnnoise": 20.0}
+
+
+@pytest.fixture(params=sorted(LATENCY_MS))
+def audio(request: pytest.FixtureRequest) -> NexoraAudio:
+    a = NexoraAudio(sample_rate=48000, noise_backend=request.param, **NC_ONLY)
     a.initialize()
     yield a
     a.close()
@@ -30,8 +33,8 @@ class TestProcessChunk:
         x = mix(speech(48000), white(len(speech(48000))), 5)[:48000]
         outs = [audio.process_chunk(x[i : i + 480]) for i in range(0, 48000, 480)]
         assert all(o.shape == (480,) and o.dtype == np.float32 for o in outs)
-        assert audio.latency.algorithmic_ms == pytest.approx(20.0)
-        assert audio.backends == ["rnnoise"]
+        assert audio.backends == [audio.config.noise_backend]
+        assert audio.latency.algorithmic_ms == pytest.approx(LATENCY_MS[audio.backends[0]])
         assert audio.timing.count == 100 and audio.timing.p99_ms < 10.0
 
     def test_int16_in_int16_out_and_2d_layout(self, audio: NexoraAudio) -> None:
@@ -94,7 +97,7 @@ class TestProcessFile:
         assert out_rate == rate and out.shape == (len(clean), channels)
         assert sf.info(str(dst)).subtype == "PCM_16"
         assert report.frames == len(clean) and report.channels == channels
-        assert report.real_time_factor < 1.0 and report.backends == ("rnnoise",)
+        assert report.real_time_factor < 1.0 and report.backends == (audio.config.noise_backend,)
         gain = si_sdr(clean, out[:, 0]) - si_sdr(clean, noisy)
         assert gain > 8.0, f"aligned SI-SDR gain only {gain:.1f} dB"
 

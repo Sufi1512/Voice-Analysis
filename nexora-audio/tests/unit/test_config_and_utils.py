@@ -16,7 +16,7 @@ class TestConfig:
         c = NexoraConfig()
         assert c.sample_rate == 48000 and c.channels == 1 and c.frame_samples == 480
         assert c.requested_features() == ["noise_cancellation", "voice_enhancement"]
-        assert c.noise_cancellation_strength == 0.85
+        assert c.noise_cancellation_strength == 1.0 and c.speech_protection_strength == 0.85
 
     @pytest.mark.parametrize("rate", [11025, 96000, 0])
     def test_rejects_unsupported_rate(self, rate: int) -> None:
