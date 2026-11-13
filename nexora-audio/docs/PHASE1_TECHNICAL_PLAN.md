@@ -202,3 +202,19 @@ Full default chain vs previous version (JFK clip with 2 s noise-only padding, 16
 Limits: noise under the voice is still only 0.5-2 dB lower than before. Removing it further
 risks distorting the voice (higher caps cut more speech). DFN3's binary needs glibc 2.35.
 The wheel is still tagged `py3-none-any` (Phase 9).
+
+## 10. Server integration (2026-11-13)
+Target use: between the product's WebSocket and its agentic AI platform (server-side,
+like Krisp VIVA). Microphone capture is not needed.
+- `StreamSession` per connection: bytes in/out (PCM16, float32, G.711 mu/A-law bit-exact),
+  sync and asyncio APIs, independent and thread-parallel (tested identical to sequential).
+- Rule-based turn events on Silero VAD: speech_start/end, end_of_turn (700 ms),
+  interruption (400 ms of speech while the agent talks), backchannel (shorter). Tested on
+  real speech: a 0.28 s word is reported as a backchannel, a 1.7 s phrase as an interruption.
+- Reference WebSocket bridge, tested end to end with real sockets.
+- Capacity: ~5.6 sessions per core (default DFN3 pipeline), ~14.7 (RNNoise); see
+  `docs/benchmarks.md`.
+- Dockerfile for the bridge (not built in this workspace: no Docker daemon).
+
+Open: learned end-of-turn model (Smart Turn, licence and model download to verify);
+echo cancellation using the agent's TTS as reference; per-platform wheels.

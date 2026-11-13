@@ -1,6 +1,14 @@
 # Changelog
 
 ## 0.1.0.dev0 — unreleased
+### Added (server integration)
+- `StreamSession`: per-connection bytes-in/bytes-out processing with sync and async APIs.
+- Codecs: PCM16, float32, G.711 mu-law and A-law (bit-exact with the ITU reference).
+- Turn events: speech_start, speech_end, end_of_turn, interruption, backchannel (`TurnConfig`).
+- Reference WebSocket bridge (`nexora_audio.integrations.websocket_bridge`, extra `[server]`).
+- Capacity benchmark (`benchmarks/sessions.py`, `docs/benchmarks.md`).
+- Faster integer-ratio resampling via SciPy's compiled FIR filter.
+
 ### Changed (background noise)
 - DeepFilterNet3 noise suppression is now the default backend (RNNoise is the fallback).
 - Speech-gated suppression with Silero VAD: capped while speaking, full removal plus a

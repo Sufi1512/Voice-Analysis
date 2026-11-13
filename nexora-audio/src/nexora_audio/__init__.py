@@ -17,12 +17,16 @@ from nexora_audio.exceptions import (
     NotInitializedError,
 )
 from nexora_audio.io.wav import ProcessingReport
+from nexora_audio.streaming.codecs import AudioFormat
+from nexora_audio.streaming.session import SessionOutput, StreamSession
+from nexora_audio.streaming.turns import TurnConfig, TurnEvent
 from nexora_audio.version import __version__
 
 register_builtin_backends(default_registry)
 
 __all__ = [
     "AnalysisResult",
+    "AudioFormat",
     "AudioFormatError",
     "BackendError",
     "ConfigurationError",
@@ -36,5 +40,9 @@ __all__ = [
     "NexoraError",
     "NotInitializedError",
     "ProcessingReport",
+    "SessionOutput",
+    "StreamSession",
+    "TurnConfig",
+    "TurnEvent",
     "__version__",
 ]

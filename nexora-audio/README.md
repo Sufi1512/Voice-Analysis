@@ -4,10 +4,10 @@ Real-time audio processing SDK for Python: noise cancellation, voice activity
 detection, gain control and streaming for voice agents, WebRTC, call-center
 and meeting applications.
 
-> **Status: 0.1.0.dev0.** Noise cancellation (DeepFilterNet3, with RNNoise as
-> fallback), speech-gated pause cleaning, voice activity detection (Silero), voice
-> enhancement and gain control work for streaming chunks and files. Microphone
-> capture is not implemented yet.
+> **Status: 0.1.0.dev0.** Built for servers that sit between a WebSocket and an AI
+> agent: per-call streaming sessions with noise cancellation (DeepFilterNet3, RNNoise
+> fallback), clean pauses, voice enhancement, VAD, and turn/interruption events, over
+> PCM16 or G.711 telephony audio. Microphone capture is not implemented (not needed server-side).
 > See `docs/PHASE1_TECHNICAL_PLAN.md`.
 
 ## Install (local, not published)
@@ -22,6 +22,54 @@ DeepFilterNet3 needs glibc 2.35+ (Ubuntu 22.04+), RNNoise runs on almost any Lin
 `NexoraAudio().capabilities()` shows which backend is used. On other platforms set
 `NEXORA_DEEPFILTER_LIBRARY` and/or `NEXORA_RNNOISE_LIBRARY` (see
 `src/nexora_audio/_native/PROVENANCE.md`).
+
+## Use it between your WebSocket and your AI agent (server)
+
+One `StreamSession` per caller. Feed raw bytes as they arrive. You get cleaned bytes
+plus conversation events for your agent.
+
+```python
+from nexora_audio import AudioFormat, StreamSession
+
+session = StreamSession(input_format=AudioFormat("pcm16", 16000))  # or ("mulaw", 8000)
+
+
+async def on_client_audio(chunk: bytes) -> None:
+    out = await session.aprocess(chunk)  # runs off the event loop
+    await agent.send_audio(out.audio)  # cleaned audio, same format
+    for event in out.events:  # speech_start, speech_end, end_of_turn,
+        await agent.send_event(event.to_dict())  # interruption, backchannel
+
+
+def on_agent_tts(playing: bool) -> None:
+    session.set_agent_speaking(playing)  # enables interruption/backchannel events
+```
+
+| Event | Meaning | Typical agent action |
+|---|---|---|
+| `speech_start` | user started talking | optional: lower TTS volume |
+| `speech_end` | user stopped (300 ms silence) | |
+| `end_of_turn` | user finished their turn (700 ms silence after at least 200 ms of speech) | send the transcript to the LLM |
+| `interruption` | user talked over the agent for 400 ms or more | stop TTS now |
+| `backchannel` | short "uh-huh"/"yeah" while the agent talks | keep talking |
+
+Turn and interruption detection is **rule-based** (Silero VAD plus timing, tunable via
+`TurnConfig`). It doesn't understand words, so it can't tell an unfinished sentence from
+a finished one, or a short "stop!" from a short "yeah".
+
+A complete reference bridge (client WS -> nexora -> agent WS, with JSON events and
+automatic agent-speaking detection) is in `nexora_audio.integrations.websocket_bridge`:
+
+```bash
+pip install -e ".[server]"
+python examples/websocket_bridge.py --agent ws://localhost:9000/agent --port 8765
+```
+
+**Formats:** `pcm16`, `float32`, `mulaw`, `alaw` (G.711, bit-exact with the ITU reference),
+8-48 kHz, mono or stereo. The input and output formats can differ (e.g. 8 kHz in, 16 kHz out).
+**Capacity:** about 4 concurrent calls per CPU core with the default pipeline, about 10 with
+RNNoise (`docs/benchmarks.md`). Sessions run in parallel across cores.
+**Latency:** about 32 ms at 16 kHz with the default pipeline (`session.latency_ms`).
 
 ## Denoise a file
 

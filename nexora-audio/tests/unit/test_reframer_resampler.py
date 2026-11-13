@@ -76,3 +76,16 @@ class TestResampler:
         rs = StreamingResampler(48000, 48000, 1)
         x = np.ones((1, 10), np.float32)
         assert rs.process(x) is x and rs.delay_out_samples == 0.0
+
+
+@pytest.mark.parametrize("rin,rout", [(16000, 48000), (48000, 16000), (8000, 48000), (48000, 8000)])
+def test_fast_integer_path_matches_general_path(rin: int, rout: int) -> None:
+    x = RNG.standard_normal((2, rin // 3)).astype(np.float32) * 0.1
+    fast = StreamingResampler(rin, rout, 2)
+    slow = StreamingResampler(rin, rout, 2, fast=False)
+    sizes = [1, 7, 160, 333, 480]
+    a = np.concatenate([feed_in_chunks(fast.process, x, sizes), fast.flush()], axis=1)
+    b = np.concatenate([feed_in_chunks(slow.process, x, sizes), slow.flush()], axis=1)
+    n = min(a.shape[1], b.shape[1])
+    assert abs(a.shape[1] - b.shape[1]) <= 3
+    np.testing.assert_allclose(a[:, :n], b[:, :n], atol=2e-6)

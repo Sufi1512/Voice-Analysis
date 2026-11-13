@@ -29,11 +29,13 @@ dependencies = [
 devices = ["sounddevice>=0.4.6"]
 io = ["soundfile>=0.12"]
 eval = ["pystoi>=0.4"]
+server = ["websockets>=12"]
 dev = [
   "pytest>=8",
   "ruff>=0.6",
   "mypy>=1.10",
   "scipy-stubs",
+  "websockets>=12",
   "soundfile>=0.12",
 ]
 
@@ -67,5 +69,5 @@ files = ["src"]
 plugins = ["pydantic.mypy"]
 
 [[tool.mypy.overrides]]
-module = ["soundfile", "sounddevice", "onnxruntime"]
+module = ["soundfile", "sounddevice", "onnxruntime", "websockets"]
 ignore_missing_imports = true
