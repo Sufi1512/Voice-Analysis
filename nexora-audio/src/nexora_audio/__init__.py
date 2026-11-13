@@ -1,8 +1,9 @@
 """nexora-audio: real-time AI audio processing SDK."""
 
+from nexora_audio.backends import register_builtin_backends
 from nexora_audio.client import NexoraAudio
 from nexora_audio.config import NexoraConfig
-from nexora_audio.core.capabilities import FeatureStatus
+from nexora_audio.core.capabilities import FeatureStatus, default_registry
 from nexora_audio.core.pipeline import LatencyReport
 from nexora_audio.exceptions import (
     AudioFormatError,
@@ -14,7 +15,10 @@ from nexora_audio.exceptions import (
     NexoraError,
     NotInitializedError,
 )
+from nexora_audio.io.wav import ProcessingReport
 from nexora_audio.version import __version__
+
+register_builtin_backends(default_registry)
 
 __all__ = [
     "AudioFormatError",
@@ -29,5 +33,6 @@ __all__ = [
     "NexoraConfig",
     "NexoraError",
     "NotInitializedError",
+    "ProcessingReport",
     "__version__",
 ]

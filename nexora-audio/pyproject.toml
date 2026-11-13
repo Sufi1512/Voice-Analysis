@@ -64,3 +64,7 @@ python_version = "3.11"
 strict = true
 files = ["src"]
 plugins = ["pydantic.mypy"]
+
+[[tool.mypy.overrides]]
+module = ["soundfile", "sounddevice"]
+ignore_missing_imports = true
