@@ -65,6 +65,20 @@ class NexoraConfig(BaseModel):
         le=1.0,
         description="Suppression while speech is present (0.85 caps it at ~16.5 dB).",
     )
+    speech_guard: bool = Field(
+        True,
+        description=(
+            "Never remove more than the noise can explain: in frames clearly above the noise "
+            "floor that may be speech, restore what the model removed beyond the noise share "
+            "(DeepFilterNet3; needs speech_protection)."
+        ),
+    )
+    speech_guard_margin_db: float = Field(
+        6.0,
+        ge=0.0,
+        le=30.0,
+        description="Extra removal the speech guard allows beyond the noise share, dB.",
+    )
     noise_backend: NoiseBackend = "auto"
     voice_isolation: bool = False
     echo_cancellation: bool = False

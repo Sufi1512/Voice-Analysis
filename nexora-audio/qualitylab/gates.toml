@@ -1,0 +1,211 @@
+# NEXORA voice quality gates (VOICE_QUALITY_PLAN.md, "How we prove it").
+#
+# enforce = true  -> must pass today; a failure fails the run (and CI).
+# enforce = false -> target for a later phase (`phase`); reported, never blocks.
+# Every gate is also checked against baseline.json: a value worse than the baseline
+# by more than `tolerance` fails the run even when the gate is only a target
+# (except gates with regress = false).
+#
+# agg: max | min | mean | median | sum | pct_true (share of rows where metric is 1, in %)
+#      | wer_reduction (relative WER gain of output over input, in %, pooled over words)
+#      | wer_delta (pooled output WER minus input WER, in points)
+
+[[gate]]
+id = "speech_cut"
+title = "Audible speech cut, SNR 0 dB and above (%)"
+metric = "speech_cut_pct"
+sets = ["clean", "noise", "phone", "reverb"]
+min_snr = 0
+agg = "max"
+op = "<="
+threshold = 2.0
+tolerance = 0.5
+phase = "E3"
+
+[[gate]]
+id = "stoi_no_harm"
+title = "Intelligibility change, worst case (STOI out minus in)"
+metric = "stoi_delta"
+sets = ["clean", "noise", "phone", "reverb"]
+agg = "min"
+op = ">="
+threshold = -0.01
+tolerance = 0.005
+phase = "E3"
+
+[[gate]]
+id = "wer_clean"
+title = "Transcription on clean speech: WER change (points)"
+metric = "wer"
+sets = ["clean"]
+agg = "wer_delta"
+op = "<="
+threshold = 0.5
+tolerance = 0.5
+phase = "E3"
+
+[[gate]]
+id = "wer_noisy"
+title = "Transcription at 5 dB SNR or below: fewer errors than raw (%)"
+metric = "wer"
+sets = ["noise"]
+max_snr = 5
+agg = "wer_reduction"
+op = ">="
+threshold = 20.0
+tolerance = 3.0
+phase = "E3"
+
+[[gate]]
+id = "pause_noise"
+title = "Noise left in pauses, SNR 0 to 20 dB, worst case (dB vs input)"
+metric = "pause_noise_db"
+sets = ["noise"]
+min_snr = 0
+max_snr = 20
+agg = "max"
+op = "<="
+threshold = -60.0
+tolerance = 3.0
+phase = "E3"
+
+[[gate]]
+id = "pause_level"
+title = "Loudest noise left in pauses, any SNR (dBFS; speech is at -26)"
+metric = "pause_level_dbfs"
+sets = ["noise"]
+agg = "max"
+op = "<="
+threshold = -70.0
+tolerance = 3.0
+phase = "E3"
+
+[[gate]]
+id = "pumping"
+title = "Noise pumping in pauses, worst case (dB spread)"
+metric = "pumping_db"
+sets = ["noise"]
+agg = "max"
+op = "<="
+threshold = 3.0
+tolerance = 0.5
+phase = "E3"
+
+[[gate]]
+id = "erle"
+title = "Echo removed while only the agent talks, worst case (ERLE dB)"
+metric = "erle_db"
+sets = ["echo"]
+kind = "single"
+agg = "min"
+op = ">="
+threshold = 30.0
+tolerance = 2.0
+phase = "E4"
+
+[[gate]]
+id = "false_barge_echo"
+title = "False barge-ins on echo-only audio (count)"
+metric = "false_barge_ins"
+sets = ["echo"]
+kind = "single"
+agg = "sum"
+op = "<="
+threshold = 0
+tolerance = 0
+phase = "E4"
+
+[[gate]]
+id = "missed_barge"
+title = "Missed barge-ins during double-talk (%)"
+metric = "missed_barge_in"
+sets = ["echo"]
+kind = "double"
+agg = "pct_true"
+op = "<="
+threshold = 2.0
+tolerance = 0
+phase = "E4"
+
+[[gate]]
+id = "double_talk_cut"
+title = "Caller speech cut while the agent talks, worst case (%)"
+metric = "double_talk_cut_pct"
+sets = ["echo"]
+kind = "double"
+agg = "max"
+op = "<="
+threshold = 3.0
+tolerance = 1.0
+phase = "E4"
+
+[[gate]]
+id = "turn_cutoff"
+title = "Mid-sentence pauses taken as end of turn (%)"
+metric = "pauses_cut"
+sets = ["turns"]
+agg = "pause_pct"
+op = "<="
+threshold = 3.0
+tolerance = 0
+phase = "E5"
+
+[[gate]]
+id = "reply_gap"
+enforce = true
+title = "Reply gap: end of speech to end-of-turn event, median (ms)"
+metric = "reply_gap_ms"
+sets = ["turns"]
+agg = "median"
+op = "<="
+threshold = 800.0
+tolerance = 50.0
+phase = "E5"
+
+[[gate]]
+id = "latency"
+enforce = true
+title = "Added delay (ms)"
+metric = "latency_ms"
+sets = ["clean", "noise", "phone"]
+agg = "max"
+op = "<="
+threshold = 40.0
+tolerance = 1.0
+phase = "E4"
+
+[[gate]]
+id = "latency_reported"
+enforce = true
+title = "Reported delay matches measured delay, worst error (ms)"
+metric = "latency_error_ms"
+sets = ["clean"]
+agg = "max"
+op = "<="
+threshold = 5.0
+tolerance = 1.0
+phase = "E2a"
+
+[[gate]]
+id = "chunk_time"
+title = "Processing time per 20 ms chunk, p99 worst case (ms; inflated when workers share CPUs)"
+metric = "chunk_p99_ms"
+sets = ["clean", "noise", "phone"]
+agg = "max"
+op = "<="
+threshold = 10.0
+tolerance = 3.0
+phase = "E4"
+regress = false  # timing depends on the machine and its load: no baseline check
+
+[[gate]]
+id = "loss_5pct"
+title = "Intelligibility lost to 5% packet loss, worst case (STOI drop)"
+metric = "loss_stoi_drop"
+sets = ["loss"]
+loss_pct = 5
+agg = "max"
+op = "<="
+threshold = 0.05
+tolerance = 0.01
+phase = "E2"

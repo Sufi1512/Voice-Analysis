@@ -1,0 +1,62 @@
+name: voice-quality
+
+# Phase E2a quality gates (nexora-audio/docs/VOICE_QUALITY_PLAN.md).
+# Pull requests touching audio code: unit tests + the fast quality profile.
+# Nightly and on demand: the full profile. Reports are uploaded as artifacts.
+
+on:
+  pull_request:
+    paths:
+      - "nexora-audio/**"
+      - ".github/workflows/voice-quality.yml"
+  push:
+    branches: [main]
+    paths:
+      - "nexora-audio/**"
+  schedule:
+    - cron: "17 1 * * *"
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: "fast or full"
+        default: "full"
+
+defaults:
+  run:
+    working-directory: nexora-audio
+
+jobs:
+  quality:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      NEXORA_QL_CACHE: ${{ github.workspace }}/nexora-audio/qualitylab/.cache
+      PROFILE: ${{ github.event_name == 'schedule' && 'full' || inputs.profile || 'fast' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install
+        run: pip install -e ".[dev,qualitylab]"
+      - name: Lint and unit tests
+        run: |
+          ruff check src tests qualitylab
+          mypy
+          pytest -q
+      - name: Cache test audio and STT model
+        uses: actions/cache@v4
+        with:
+          path: nexora-audio/qualitylab/.cache
+          key: qualitylab-${{ hashFiles('nexora-audio/qualitylab/sources.py') }}
+      - name: Fetch pinned test audio
+        run: python -m qualitylab fetch --stt
+      - name: Quality gates (${{ env.PROFILE }})
+        run: python -m qualitylab run --profile "$PROFILE"
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: voice-quality-${{ env.PROFILE }}
+          path: nexora-audio/qualitylab/out/

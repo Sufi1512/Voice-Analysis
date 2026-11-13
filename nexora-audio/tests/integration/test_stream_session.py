@@ -47,7 +47,9 @@ def test_pcm16_session_events_and_length() -> None:
     assert types[0] == "speech_start" and types[-1] == "end_of_turn"
     assert 2250 < events[0].time_ms < 2500  # first word at 2.32 s
     last_end = [e for e in events if e.type == "speech_end"][-1]
-    assert 12_800 < last_end.time_ms < 13_200  # speech ends at ~12.99 s
+    # the last word ends at ~12.45 s; crowd noise rises after it (a short blip there may or
+    # may not be reported as speech)
+    assert 12_300 < last_end.time_ms < 13_200
 
 
 @pytest.mark.parametrize("enc", ["mulaw", "alaw"])

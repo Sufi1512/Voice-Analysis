@@ -84,14 +84,25 @@ Usage = sum of `audio_seconds` per org per day/month (the billing unit is audio 
 
 ## 5. Phases
 
-| Phase | Scope | Status |
-|---|---|---|
-| E1 | API server: Process + Relay WebSockets, orgs/keys/profiles/sessions/usage, session tokens, limits, metrics, health, JSON logs, Python client SDK, Docker + compose, tests | **done 2026-11-13** |
-| E2 | Kubernetes manifests (Deployment, HPA on active sessions, PDB), Alembic migrations, Redis-backed cluster-wide concurrency limits | planned |
-| E3 | Admin dashboard (web): orgs, keys, profiles, usage charts | planned |
-| E4 | Billing integration (Stripe metered usage), SSO (OIDC) for the dashboard, audit export | planned |
-| E5 | Load and soak tests (100s of concurrent sessions), chaos tests, security review / pen test | planned |
-| E6 | Engine roadmap: learned end-of-turn model, echo cancellation with agent TTS reference, multi-platform wheels | planned |
+Order after E1: get nexora-audio into real calls (E2), fix the weakest audio cases
+(E3), make voice agents feel natural (E4, E5), then production and commercial work
+(E6 to E10), then the hardest research item (E11). Each phase gets its own spec,
+approved before implementation.
+
+| Phase | Scope | Done when | Status |
+|---|---|---|---|
+| E1 | API server: Process + Relay WebSockets, orgs/keys/profiles/sessions/usage, session tokens, limits, metrics, health, JSON logs, Python client SDK, Docker + compose, tests | §7 criteria pass | **done 2026-11-13** |
+| E2a | **Quality lab:** test corpus v1 (real phone calls, babble, music, echo, turns, packet loss), metric suite, CI quality gates, baseline report. Details: `nexora-audio/docs/VOICE_QUALITY_PLAN.md` | Baseline measured on every set; gates run on every audio pull request | **done 2026-11-13**: `nexora-audio/docs/QUALITY_BASELINE.md`. Also shipped the speech guard (phone speech cut 77.9% → 3.6% worst case) |
+| E2 | **Dograh integration:** a `nexora` engine in Dograh's `services/pipecat/noise_reduction/factory.py` wrapping nexora-audio as a Pipecat audio filter, selectable per agent (DeepFilterNet3, RNNoise or off), kept inside Dograh's fail-open wrapper. Plus live per-call quality metrics, packet-loss concealment and Opus | A Dograh test call runs through nexora-audio; a filter fault never drops the call; added latency matches `latency_ms`; packet-loss gate passes | planned |
+| E3 | **Phone-line quality:** test set of real 8 kHz (μ-law/A-law) speech and babble/crowd noise; baseline STOI, SI-SDR and audible-speech cut; tune or swap the model for narrowband and babble | Both cases beat today's baseline on the test set with no extra audible speech cut; results in `benchmarks.md` | planned |
+| E4 | **Echo cancellation:** a working backend for the existing `echo_cancellation` + `reference=` interface, using the agent's TTS audio as reference; base: WebRTC AEC3 (BSD-3) | Agent's own voice in the caller's audio is suppressed enough that it no longer triggers false barge-ins in tests | planned |
+| E5 | **Smarter end-of-turn:** a learned model that judges whether the speaker has finished, alongside the silence-based TurnTracker; Smart Turn is the first candidate (licence and model download to verify first) | Fewer cut-offs and shorter reply delay than silence-only on a labelled turn set | planned |
+| E6 | **Production infrastructure:** Kubernetes manifests (Deployment, HPA on active sessions, PDB), Alembic migrations, Redis-backed cluster-wide concurrency limits | Scales out and in under load without dropping sessions; limits hold across instances | planned |
+| E7 | **Packaging and devices:** wheels for Linux arm64 and macOS (bundled native libraries built per platform); live microphone/speaker streaming (nexora-audio Phase 4 + 6, needs a real machine) | `pip install` works on each platform and the test suite passes there; live device demo runs | planned |
+| E8 | Admin dashboard (web): orgs, keys, profiles, usage charts | Customer admin manages keys and sees usage without the API | planned |
+| E9 | Billing integration (Stripe metered usage), SSO (OIDC) for the dashboard, audit export | Invoice usage matches recorded audio seconds | planned |
+| E10 | Load and soak tests (100s of concurrent sessions), chaos tests, security review / pen test | Agreed targets hold for 72 hours; no open high-severity findings | planned |
+| E11 | **Background voice cancellation (research spike):** remove other nearby speakers, not only noise (Krisp's signature feature); needs a speaker-aware model; survey permissively licensed models and datasets first | Go/no-go report with measured results on a multi-speaker test set | planned |
 
 ## 6. Capacity planning
 From `nexora-audio/docs/benchmarks.md`: about 5.6 concurrent sessions per CPU core with the
