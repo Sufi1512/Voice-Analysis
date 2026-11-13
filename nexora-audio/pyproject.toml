@@ -29,6 +29,7 @@ dependencies = [
 devices = ["sounddevice>=0.4.6"]
 io = ["soundfile>=0.12"]
 eval = ["pystoi>=0.4"]
+qualitylab = ["pystoi>=0.4", "soundfile>=0.12", "sherpa-onnx>=1.10"]
 server = ["websockets>=12"]
 dev = [
   "pytest>=8",
@@ -56,7 +57,7 @@ markers = [
 [tool.ruff]
 line-length = 100
 target-version = "py311"
-src = ["src", "tests"]
+src = ["src", "tests", "qualitylab"]
 extend-exclude = ["spikes"]
 
 [tool.ruff.lint]

@@ -16,6 +16,12 @@ the matching audio is output.
   of words are never removed (measured: unlimited DFN3 cut ~31-35% of speech frames)
 * no speech: no cap, plus a smooth extra ``pause_gate_db`` gate, because DFN3 lets
   bursts of low-frequency noise through in pauses (measured: -11 to -24 dB on pink noise)
+
+Speech guard (default, :mod:`nexora_audio.core.speech_guard`): DFN3 removes speech it
+does not recognise, most of all narrowband phone speech (measured by the quality lab:
+14-65% of speech frames on clean 8 kHz G.711 audio). The guard restores anything removed
+beyond the noise share in frames that are above the noise floor and may be speech, and
+keeps the pause gate open there (so a VAD miss at low SNR no longer deletes the utterance).
 """
 
 from __future__ import annotations
@@ -32,6 +38,7 @@ from nexora_audio.backends.silero import SpeechDetector
 from nexora_audio.config import NexoraConfig
 from nexora_audio.core.capabilities import BackendSpec
 from nexora_audio.core.processor import Processor
+from nexora_audio.core.speech_guard import SpeechGuard
 from nexora_audio.exceptions import BackendError
 from nexora_audio.utils.audio_utils import Float32Array
 
@@ -129,6 +136,8 @@ class DeepFilterNetProcessor(Processor):
             to disable speech gating (then ``atten_lim_db`` applies throughout and no
             pause gate is used).
         pause_gate_db: Extra attenuation in pauses (0 to disable).
+        guard_margin_db: Speech guard margin in dB, or ``None`` to disable the guard
+            (needs speech gating).
     """
 
     name = "deepfilternet3"
@@ -139,6 +148,7 @@ class DeepFilterNetProcessor(Processor):
         atten_lim_db: float = 100.0,
         speech_atten_lim_db: float | None = None,
         pause_gate_db: float = 0.0,
+        guard_margin_db: float | None = None,
     ) -> None:
         if channels not in (1, 2):
             raise BackendError("DeepFilterNet backend supports 1 or 2 channels")
@@ -176,6 +186,19 @@ class DeepFilterNetProcessor(Processor):
         self._in_ptr = self._in.ctypes.data_as(_FloatPtr)
         self._out_ptr = self._out.ctypes.data_as(_FloatPtr)
         self.local_snr_db = np.zeros(channels, dtype=np.float32)
+        self._guards = (
+            [
+                SpeechGuard(FRAME_SIZE, FRAME_SIZE / SAMPLE_RATE, LATENCY_SAMPLES, guard_margin_db)
+                for _ in range(channels)
+            ]
+            if self._detector is not None and guard_margin_db is not None
+            else []
+        )
+
+    @property
+    def guard_restored_frames(self) -> int:
+        """Frames in which the speech guard restored speech the model removed."""
+        return sum(g.restored_frames for g in self._guards)
 
     @property
     def native_sample_rate(self) -> int:
@@ -216,9 +239,17 @@ class DeepFilterNetProcessor(Processor):
             self._in[:] = frame[ch]
             self.local_snr_db[ch] = self._lib.df_process_frame(st, self._in_ptr, self._out_ptr)
             out[ch] = self._out
+        guarded = False
+        if self._guards:
+            assert self._detector is not None
+            p = self._detector.probability
+            for ch, g in enumerate(self._guards):
+                out[ch] = g.process(frame[ch], out[ch], p)
+                guarded = guarded or g.active
         if self._detector is None or self._pause_gain >= 1.0:
             return out
-        target = np.float32(1.0) if speech else np.float32(self._pause_gain)
+        open_gate = speech or guarded
+        target = np.float32(1.0) if open_gate else np.float32(self._pause_gain)
         prev = self._gain
         new = target if target > prev else prev + (target - prev) * _GATE_RELEASE
         self._gain = np.float32(new)
@@ -242,6 +273,8 @@ class DeepFilterNetProcessor(Processor):
         self._gain = np.float32(self._pause_gain)
         if self._detector is not None:
             self._detector.reset()
+        for g in self._guards:
+            g.reset()
 
     def close(self) -> None:
         for st in self._states:
@@ -263,6 +296,11 @@ def _factory(config: NexoraConfig) -> Processor:
             else None
         ),
         pause_gate_db=config.pause_gate_db if config.speech_protection else 0.0,
+        guard_margin_db=(
+            config.speech_guard_margin_db
+            if config.speech_protection and config.speech_guard
+            else None
+        ),
     )
 
 

@@ -109,9 +109,13 @@ with NexoraAudio(sample_rate=16000, frame_ms=10) as audio:
    (`deepfilter_speech_atten_lim_db`, 20 dB) so quiet word parts survive. In pauses there
    is no cap, plus a smooth extra gate (`pause_gate_db`, 40 dB), so pauses are silent.
    The model's own 30 ms delay lets the gate open before a word reaches the output.
-3. **Voice enhancement**: 80 Hz high-pass, +3 dB clarity at 3 kHz (`clarity_db`),
+3. **Speech guard** (`speech_guard=True`): in frames above the noise floor that may be
+   speech, the model may never remove more than the noise can explain (+6 dB,
+   `speech_guard_margin_db`). Without it DeepFilterNet3 cut up to 78% of clean 8 kHz phone
+   speech; with it, at most 3.6% on the quality lab's phone set (`docs/QUALITY_BASELINE.md`).
+4. **Voice enhancement**: 80 Hz high-pass, +3 dB clarity at 3 kHz (`clarity_db`),
    peak limiter at -1 dBFS.
-4. **Gain control** (`auto_gain_control=True`, off by default): slow speech leveler.
+5. **Gain control** (`auto_gain_control=True`, off by default): slow speech leveler.
 
 | Setting | Default | Effect |
 |---|---|---|
@@ -119,6 +123,7 @@ with NexoraAudio(sample_rate=16000, frame_ms=10) as audio:
 | `speech_protection` | `True` | Speech-gated caps/gate as above. `False` = constant suppression |
 | `deepfilter_speech_atten_lim_db` | `20` | Max noise removal while speaking (higher = cleaner but riskier) |
 | `pause_gate_db` | `40` | Extra attenuation in pauses |
+| `speech_guard`, `speech_guard_margin_db` | `True`, `6` | Never remove speech beyond the noise share (see step 3) |
 | `noise_cancellation_strength` / `speech_protection_strength` | `1.0` / `0.85` | Same idea for the RNNoise backend |
 | `voice_enhancement`, `clarity_db` | `True`, `3.0` | High-pass + clarity EQ + limiter |
 | `auto_gain_control` | `False` | Level speech towards `agc_target_dbfs` (-20) |
@@ -165,3 +170,8 @@ results are not proof of real-world quality.
 Bundled: DeepFilterNet3 (MIT OR Apache-2.0), RNNoise (BSD-3-Clause), Silero VAD model (MIT). See `src/nexora_audio/THIRD_PARTY_NOTICES.md`
 and `src/nexora_audio/_native/PROVENANCE.md`. Dependency review:
 `docs/DEPENDENCY_LICENSES.md`. The licence for nexora-audio itself has not been chosen yet.
+
+## Quality lab
+Every audio change is measured on a 242-case test corpus (noise, phone, reverb, echo, turns,
+packet loss) against quality gates: `python -m qualitylab run --profile fast`. See
+`docs/QUALITY_BASELINE.md` and `docs/VOICE_QUALITY_PLAN.md`.

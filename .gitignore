@@ -12,6 +12,10 @@ reference/recordings/**/*.m4a
 node_modules/
 __pycache__/
 .DS_Store
+# quality lab: downloaded test audio/models and run outputs
+nexora-audio/qualitylab/.cache/
+nexora-audio/qualitylab/out/
+.venv/
 
 # planning-with-files working files
 task_plan.md
