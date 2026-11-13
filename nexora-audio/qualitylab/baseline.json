@@ -1,31 +1,31 @@
 {
  "fast": {
-  "chunk_time": 7.749,
+  "chunk_time": 5.883,
   "double_talk_cut": 10.56,
   "erle": 92.8,
   "false_barge_echo": 0.0,
   "latency": 34.0,
   "latency_reported": 0.0,
-  "loss_5pct": 0.0703,
+  "loss_5pct": 0.0704,
   "missed_barge": 0.0,
   "pause_level": -41.2,
   "pause_noise": -3.6,
-  "pumping": 13.9,
+  "pumping": 15.0,
   "reply_gap": 600.0,
-  "speech_cut": 0.74,
-  "stoi_no_harm": -0.0156,
+  "speech_cut": 1.0,
+  "stoi_no_harm": -0.0189,
   "turn_cutoff": 100.0,
   "wer_clean": 0.0,
-  "wer_noisy": 14.285714285714285
+  "wer_noisy": -7.142857142857134
  },
  "full": {
-  "chunk_time": 8.891,
-  "double_talk_cut": 42.12,
+  "chunk_time": 8.553,
+  "double_talk_cut": 44.44,
   "erle": 14.4,
   "false_barge_echo": 0.0,
   "latency": 34.0,
   "latency_reported": 0.06,
-  "loss_5pct": 0.0392,
+  "loss_5pct": 0.0396,
   "missed_barge": 18.75,
   "pause_level": -24.1,
   "pause_noise": -2.5,
@@ -34,7 +34,7 @@
   "speech_cut": 5.16,
   "stoi_no_harm": -0.0666,
   "turn_cutoff": 87.5,
-  "wer_clean": 1.2295081967213115,
-  "wer_noisy": 14.548802946593012
+  "wer_clean": 0.4098360655737705,
+  "wer_noisy": 10.58931860036834
  }
 }

@@ -4,7 +4,8 @@
 up to 78% of clean phone speech; fixed with the speech guard. Results and the current gate
 status: `QUALITY_BASELINE.md`. E2 done the same day (`E2_SPEC.md`): Dograh engine patch,
 packet-loss concealment, Opus input, per-call quality numbers. E4 (echo) done on 2026-11-14
-(`E4_SPEC.md`): no more false interruptions from echo in the lab. Next: E3 (noise and phone audio).
+(`E4_SPEC.md`): no more false interruptions from echo in the lab. E3 (noise) partly done on
+2026-11-14 (`E3_SPEC.md`): background talkers removed in pauses. Next: E5 (turn-taking).
 
 2026-11-13. Covers noise, echo, cutting, turn-taking and network problems in nexora-audio, Voice Cloud and the Dograh integration.
 

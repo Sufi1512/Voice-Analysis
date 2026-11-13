@@ -39,6 +39,7 @@ from nexora_audio.config import NexoraConfig
 from nexora_audio.core.capabilities import BackendSpec
 from nexora_audio.core.processor import Processor
 from nexora_audio.core.speech_guard import SpeechGuard
+from nexora_audio.core.talker_gate import TalkerGate
 from nexora_audio.exceptions import BackendError
 from nexora_audio.utils.audio_utils import Float32Array
 
@@ -138,6 +139,8 @@ class DeepFilterNetProcessor(Processor):
         pause_gate_db: Extra attenuation in pauses (0 to disable).
         guard_margin_db: Speech guard margin in dB, or ``None`` to disable the guard
             (needs speech gating).
+        background_db: Speech this far below the caller's level is background
+            (:mod:`nexora_audio.core.talker_gate`), or ``None`` to disable.
     """
 
     name = "deepfilternet3"
@@ -149,6 +152,7 @@ class DeepFilterNetProcessor(Processor):
         speech_atten_lim_db: float | None = None,
         pause_gate_db: float = 0.0,
         guard_margin_db: float | None = None,
+        background_db: float | None = None,
     ) -> None:
         if channels not in (1, 2):
             raise BackendError("DeepFilterNet backend supports 1 or 2 channels")
@@ -195,6 +199,18 @@ class DeepFilterNetProcessor(Processor):
             else []
         )
 
+        self._bg_prev = False
+        self._talker = (
+            TalkerGate(FRAME_SIZE / SAMPLE_RATE, background_db)
+            if self._detector is not None and background_db is not None
+            else None
+        )
+
+    @property
+    def background_frames(self) -> int:
+        """Frames the detector called speech that were judged background talkers."""
+        return self._talker.background_frames if self._talker is not None else 0
+
     @property
     def guard_restored_frames(self) -> int:
         """Frames in which the speech guard restored speech the model removed."""
@@ -229,7 +245,9 @@ class DeepFilterNetProcessor(Processor):
             mono = frame.mean(axis=0, keepdims=True) if frame.shape[0] > 1 else frame
             speech = self._detector.push(mono)
             assert self.speech_atten_lim_db is not None
-            lim = self.speech_atten_lim_db if speech else self.atten_lim_db
+            # background talk (judged on the previous frame) gets no speech cap either
+            caller = speech and not self._bg_prev
+            lim = self.speech_atten_lim_db if caller else self.atten_lim_db
             if lim != self._lim_now:
                 for st in self._states:
                     self._lib.df_set_atten_lim(st, ctypes.c_float(lim))
@@ -240,12 +258,21 @@ class DeepFilterNetProcessor(Processor):
             self.local_snr_db[ch] = self._lib.df_process_frame(st, self._in_ptr, self._out_ptr)
             out[ch] = self._out
         guarded = False
+        raw = out.copy() if self._talker is not None else out
         if self._guards:
             assert self._detector is not None
             p = self._detector.probability
             for ch, g in enumerate(self._guards):
                 out[ch] = g.process(frame[ch], out[ch], p)
                 guarded = guarded or g.active
+        background = False
+        if self._talker is not None:
+            # judged on the guarded output: DFN3 alone under-reads narrowband speech
+            e = float(np.mean(out.astype(np.float64) ** 2))
+            background = self._talker.update(e, speech or guarded)
+            self._bg_prev = background
+            if background:  # background talk: no speech protection, no restoring
+                speech, guarded, out = False, False, raw
         if self._detector is None or self._pause_gain >= 1.0:
             return out
         open_gate = speech or guarded
@@ -275,6 +302,8 @@ class DeepFilterNetProcessor(Processor):
             self._detector.reset()
         for g in self._guards:
             g.reset()
+        if self._talker is not None:
+            self._talker.reset()
 
     def close(self) -> None:
         for st in self._states:
@@ -296,6 +325,7 @@ def _factory(config: NexoraConfig) -> Processor:
             else None
         ),
         pause_gate_db=config.pause_gate_db if config.speech_protection else 0.0,
+        background_db=(config.background_speech_db if config.speech_protection else None),
         guard_margin_db=(
             config.speech_guard_margin_db
             if config.speech_protection and config.speech_guard

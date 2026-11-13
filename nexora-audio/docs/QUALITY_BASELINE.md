@@ -141,6 +141,21 @@ The last row is a deliberate trade-off, accepted into the baseline: removing the
 echo costs some caller audio while both talk, mostly before the canceller has adapted.
 No other gate changed.
 
+## Update after E3 (2026-11-14)
+
+E3 (`E3_SPEC.md`) adds the background-talker gate: speech 17 dB or more below the caller's
+level is treated as background and removed in pauses. Report: `docs/quality/report-full-2026-11-14-e3.md`.
+
+| Pause noise, median | Before E3 | After E3 |
+| --- | --- | --- |
+| Babble | -24.0 dB | -36.8 dB |
+| Airport announcements | -44.9 dB | -49.6 dB |
+| Phone set | -54.0 dB | -62.8 dB |
+| Music | -43.6 dB | -44.4 dB |
+| TV / neighbour (as loud as the caller) | -3.9 dB | -3.9 dB (needs E11) |
+
+Speech cut: clean speech average 0.11% → 0.20%; phone worst case unchanged (3.7%).
+
 ## Known limits of this baseline
 
 - English speech only; no Arabic yet. No real phone calls, real echo recordings or real

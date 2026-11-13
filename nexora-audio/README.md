@@ -124,6 +124,7 @@ with NexoraAudio(sample_rate=16000, frame_ms=10) as audio:
 | `deepfilter_speech_atten_lim_db` | `20` | Max noise removal while speaking (higher = cleaner but riskier) |
 | `pause_gate_db` | `40` | Extra attenuation in pauses |
 | `speech_guard`, `speech_guard_margin_db` | `True`, `6` | Never remove speech beyond the noise share (see step 3) |
+| `background_speech_db` | `17` | Speech this far below the caller is background (TV, babble) and removed in pauses; `None` disables |
 | `noise_cancellation_strength` / `speech_protection_strength` | `1.0` / `0.85` | Same idea for the RNNoise backend |
 | `voice_enhancement`, `clarity_db` | `True`, `3.0` | High-pass + clarity EQ + limiter |
 | `auto_gain_control` | `False` | Level speech towards `agc_target_dbfs` (-20) |
