@@ -160,7 +160,11 @@ def measure(case: Case, settings: dict[str, Any], use_stt: bool) -> dict[str, An
                 row["double_talk_stoi"] = round(m.stoi(case.clean[sp], out[sp], rate), 4)
 
     if case.set == "turns":
-        eot = [e["time_ms"] / 1000 - lat_s for e in ev if e["type"] == "end_of_turn"]
+        eot = [
+            e["time_ms"] / 1000 - lat_s
+            for e in ev
+            if e["type"] == "end_of_turn" and not e.get("stream_end")
+        ]
         pauses = case.labels["pauses"]
         cut = [any(s <= t <= e + 0.2 for t in eot) for s, e in pauses]
         row["pauses"] = len(pauses)

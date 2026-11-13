@@ -168,6 +168,15 @@ class TestSmartTurnJudge:
         assert eot.to_dict()["complete_probability"] == 0.876
 
 
+def test_finish_closes_an_open_turn() -> None:
+    t = TurnTracker(TurnConfig(incomplete_silence_ms=2000), judge=lambda a, b: 0.1)
+    assert "end_of_turn" not in [e[0] for e in feed(t, [(0.9, 800), (0.0, 600)])]
+    (eot,) = [e for e in t.finish(1400) if e.type == "end_of_turn"]
+    assert eot.data["stream_end"] is True and eot.data["complete_probability"] == 0.1
+    assert t.finish(1500) == []  # nothing left open
+    assert TurnTracker().finish(0) == []
+
+
 def test_smart_turn_model_judges_real_speech() -> None:
     from nexora_audio.backends import smart_turn
 

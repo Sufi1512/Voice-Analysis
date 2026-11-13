@@ -33,6 +33,8 @@ inserted pauses as the end of the turn (gate `turn_cutoff`), with a 704 ms media
   longer when the caller sounds unfinished, which matches the priority "do not cut the
   caller". For a snappier agent set `complete_silence_ms=300` (see the table below for what
   that costs). `end_of_turn` events carry `complete_probability`.
+- **End of stream.** `flush()` closes a turn that is still waiting (for example a caller who
+  hangs up mid-pause) with an `end_of_turn` marked `stream_end: true`. The lab ignores these.
 - **Off switch.** `TurnConfig(smart_turn=False)` restores the old rule exactly.
 
 ### Why the audio stops at the last voiced frame

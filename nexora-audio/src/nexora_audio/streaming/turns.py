@@ -167,6 +167,28 @@ class TurnTracker:
                 self._candidate_start = None
         return events
 
+    def finish(self, time_ms: float) -> list[TurnEvent]:
+        """End of stream: close a turn that is still open (its wait had not run out).
+        The event carries ``stream_end: True``."""
+        c = self.config
+        events: list[TurnEvent] = []
+        if self.in_speech:
+            self.in_speech = False
+            duration = self._last_voice - self._speech_start
+            self._turn_speech_ms += duration
+            events.append(TurnEvent("speech_end", self._last_voice, {"speech_ms": duration}))
+        if self._turn_open and self._turn_speech_ms >= c.min_turn_ms:
+            data: dict[str, Any] = {
+                "speech_ms": self._turn_speech_ms,
+                "silence_ms": max(time_ms - self._last_voice, 0.0),
+                "stream_end": True,
+            }
+            if self._verdict is not None:
+                data["complete_probability"] = round(self._verdict, 3)
+            events.append(TurnEvent("end_of_turn", max(time_ms, self._last_voice), data))
+        self._turn_open, self._turn_speech_ms, self._verdict = False, 0.0, None
+        return events
+
     def _wait_ms(self) -> float:
         """Silence needed before the open turn ends."""
         c = self.config

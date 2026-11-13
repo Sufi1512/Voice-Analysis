@@ -309,6 +309,9 @@ class StreamSession:
             out = self._pipeline.flush()
             self._remember(out)
             events = self._collect_events()
+            if self._turns is not None:  # the stream is over: so is an open turn
+                end_ms = 1000.0 * self._pos / self.input_format.sample_rate
+                events += self._turns.finish(end_ms)
             audio = self._encode(out)
             if self._out_rs is not None:
                 audio += encode(self._out_rs.flush(), self.output_format)
