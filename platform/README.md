@@ -9,7 +9,7 @@ AI workflows and agents (graphon / Dify), shared knowledge, model management and
 governance behind one portal and one API.
 
 ## Status
-Phase P0 (foundations) of the [implementation roadmap](docs/NEXORA_IMPLEMENTATION_ROADMAP.md).
+P0 done: Dograh pinned read only with the `nexora` noise engine, tested in CI (`engines/dograh/`, [P0 spec](docs/P0_SPEC.md)). P1 ([NEXORA Core spec](docs/P1_SPEC.md)) and the [Workflow Runner spec](docs/WORKFLOW_RUNNER_SPEC.md) are drafts awaiting approval.
 
 ## Layout (target)
 ```
@@ -19,7 +19,7 @@ services/core       nexora-core (identity, tenancy, RBAC, registry, orchestrator
 services/ai-runtime graphon-based AI runtime
 packages/           Shared UI, API client, config
 sdks/               Python and TypeScript SDKs
-engines/            Pinned engine versions and overlays
+engines/dograh/     Pinned Dograh + Pipecat, NEXORA patches, tests (P0)
 infrastructure/     Docker, Kubernetes/Helm, monitoring
 docs/               Architecture, database, integration spec, roadmap, engine audits
 (skills)            Project skills live at the repo root in /.claude/skills (see /.claude/SKILLS.md)
