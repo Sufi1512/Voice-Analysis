@@ -33,6 +33,7 @@
   "pause_level": -24.1,
   "pause_noise": -2.5,
   "pumping": 21.01,
+  "pumping_added": 12.778,
   "reply_gap": 648.0,
   "sentence_pause_cut": 75.0,
   "speech_cut": 5.16,

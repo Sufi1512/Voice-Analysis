@@ -72,3 +72,25 @@ changes, both recorded in the baseline:
 Worst-case pause and pumping numbers are unchanged: they come from background as loud as
 the caller (E11).
 
+
+## Pause-noise pumping: what it is made of (bug round, 2026-11-14, I-006)
+
+The `pumping` gate (output level spread in pauses, worst 21 dB, target 3) also counts the
+noise's own swing. A new metric subtracts it: `pumping_added_db` = output spread minus input
+spread in the same pauses; gate `pumping_added` (share of noise cases over 3 dB, report-only,
+in the full baseline). Full profile: **23 of 180 noise cases (12.8%)** get more than 3 dB
+added:
+
+| Noise | Cases | Cause |
+| --- | --- | --- |
+| babble, neighbour, airport announcements, music | 16 | Background talkers / speech-like noise: the speech detector opens on it, the noise remover partly keeps it. This is I-005 (E11: needs a trained model) |
+| door slams | 3 | The detector opens on the slam; the slam passes at the speech cap |
+| vacuum, air conditioner, copy machine | 4 | At 0 to -5 dB SNR (noise as loud as the voice or louder) the detector or the speech guard opens the gate on the noise |
+
+Tried on the steady and impulsive noises (vacuum, air conditioner, copy machine, door,
+keyboard; 60 cases): a pause gate of 20 or 10 dB instead of 40 changes the worst pumping by
+less than 0.1 dB (the noise remover already silences these pauses; the swing comes from the
+moments the gate opens) and lets more noise through (median pause noise -61 → -54 / -48 dB).
+A stricter speech guard (9 dB margin instead of 6) lowers it by 0.5-1.5 dB. Neither is worth
+it: the openings are the speech protection working at very low SNR, and not cutting the
+caller's voice comes first. No defaults changed.

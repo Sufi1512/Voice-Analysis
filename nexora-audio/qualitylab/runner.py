@@ -179,6 +179,12 @@ def measure(case: Case, settings: dict[str, Any], use_stt: bool) -> dict[str, An
             row["pause_level_dbfs"] = round(m.pause_level_dbfs(out, rate, case.speech_span), 1)
             row["under_voice_db"] = round(m.under_voice_db(case.clean, case.noise, out, rate), 1)
             row["pumping_db"] = round(m.pumping_db(out, rate, case.speech_span), 2)
+            # the swing processing adds: the noise's own swing in pauses (door slams,
+            # typing) is not pumping
+            row["pumping_added_db"] = round(
+                row["pumping_db"] - m.pumping_db(case.mic, rate, case.speech_span), 2
+            )
+            row["pumping_added_over3"] = row["pumping_added_db"] > 3.0
         if case.set == "clean":
             est = m.estimate_delay(case.clean, r["out"], int(0.2 * rate))
             row["latency_measured_ms"] = round(est * 1000 / rate, 2)

@@ -94,6 +94,17 @@ tolerance = 0.5
 phase = "E3"
 
 [[gate]]
+id = "pumping_added"
+title = "Level swing in pauses added by processing (output minus input spread), share of cases over 3 dB (%)"
+metric = "pumping_added_over3"
+sets = ["noise"]
+agg = "pct_true"
+op = "<="
+threshold = 5.0
+tolerance = 3.0
+phase = "E3"
+
+[[gate]]
 id = "erle"
 title = "Echo removed while only the agent talks, worst case (ERLE dB)"
 metric = "erle_db"
