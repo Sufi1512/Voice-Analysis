@@ -148,3 +148,13 @@ class AuditOut(BaseModel):
     action: str
     details: dict[str, Any]
     at: datetime
+
+
+class MeOut(BaseModel):
+    """Who the caller is (the dashboard's first request)."""
+
+    actor: str
+    superadmin: bool
+    org_id: str | None
+    org_name: str | None
+    scopes: list[str]

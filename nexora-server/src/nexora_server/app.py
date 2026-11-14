@@ -15,6 +15,7 @@ from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from starlette.concurrency import run_in_threadpool
 
 from nexora_server.api.routes import router as api_router
+from nexora_server.dashboard import router as dashboard_router
 from nexora_server.db import Database
 from nexora_server.limits import LocalOrgLimiter, OrgLimiter, RedisOrgLimiter
 from nexora_server.observability import Metrics, setup_logging
@@ -82,6 +83,7 @@ def create_app(settings: Settings | None = None, *, prewarm: bool = True) -> Fas
 
     app.include_router(api_router)
     app.include_router(ws_router)
+    app.include_router(dashboard_router)
 
     @app.get("/healthz", tags=["ops"])
     def healthz() -> dict[str, str]:

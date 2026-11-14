@@ -10,7 +10,14 @@ from sqlalchemy.orm import Session
 
 from nexora_server.api import schemas as s
 from nexora_server.db import ApiKey, AuditEvent, Organization, Profile, SessionRecord, utcnow
-from nexora_server.deps import get_db, get_settings, org_for, require, require_superadmin
+from nexora_server.deps import (
+    get_db,
+    get_principal,
+    get_settings,
+    org_for,
+    require,
+    require_superadmin,
+)
 from nexora_server.relay_policy import RelayTargetError, check_relay_target
 from nexora_server.security import Principal, mint_session_token
 from nexora_server.services import (
@@ -33,6 +40,21 @@ router = APIRouter(prefix="/v1")
 
 def _svc(exc: ServiceError) -> HTTPException:
     return HTTPException(exc.status, exc.message)
+
+
+# ---- who am I --------------------------------------------------------------------------
+
+
+@router.get("/me", response_model=s.MeOut, tags=["auth"])
+def who_am_i(who: Principal = Depends(get_principal), db: Session = Depends(get_db)) -> s.MeOut:
+    org = db.get(Organization, who.org_id) if who.org_id else None
+    return s.MeOut(
+        actor=who.actor,
+        superadmin=who.is_superadmin,
+        org_id=who.org_id,
+        org_name=org.name if org else None,
+        scopes=sorted(who.scopes),
+    )
 
 
 # ---- organizations (super-admin) --------------------------------------------------------

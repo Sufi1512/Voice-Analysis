@@ -127,6 +127,10 @@ async with NexoraClient("https://voice.example.com", api_key="nx_…") as nx:
 
 ## Operate it
 
+- **Admin dashboard:** `http://<server>/dashboard/` (sign in with an `admin`-scope key):
+  usage and quota, API keys, profiles, recent calls with quality, audit log; super-admins
+  also manage organizations (`docs/E8_SPEC.md`).
+
 - `GET /healthz`: liveness. `GET /readyz`: readiness (DB reachable, models loaded, capacity left).
 - `GET /metrics`: Prometheus. `nexora_active_sessions`, `nexora_capacity_sessions`,
   `nexora_sessions_total{mode,outcome}`, `nexora_rejections_total{reason}`,
