@@ -288,3 +288,89 @@ session cookie, `Idempotency-Key` honoured on all `POST`s.
 4. A duplicated Dograh event creates exactly one execution update and one set of usage events.
 5. Deleting a Dograh workflow outside NEXORA is detected by the reconciler within one cycle.
 6. `DifyAppEngine` refuses to run against an engine instance with `tenancy = shared`.
+
+## 11. Knowledge (RAG)
+
+One NEXORA **Knowledge API** serves voice agents, AI agents, workflows and the public API.
+Engine knowledge features are not the shared store (Architecture §6).
+
+### 11.1 Back ends
+| Deployment | Store | Notes |
+|---|---|---|
+| Shared SaaS | PostgreSQL + pgvector (`documents`, `document_chunks`, DB doc §3.6) | Every row carries `organization_id`; row-level security on |
+| Dedicated | Same, or `DifyDatasetKnowledge` over Dify `/v1/datasets/*` | Same Knowledge API either way |
+
+Each knowledge base is fixed to one multilingual embedding model. Changing it means a full reindex.
+
+### 11.2 Ingestion pipeline (background jobs, `ingestion_jobs`)
+1. **Fetch**: upload, URL crawl (sitemap, re-crawl schedule), API push. Connectors (SharePoint, Drive) later.
+2. **Detect**: MIME type and language; route to a parser (§11.3).
+3. **Parse** to one internal document model: headings, paragraphs, lists, tables, figures, page numbers, reading order.
+4. **Quality check per page**: too little text, broken table, mixed reading order → page flagged, second parser tried, best result kept.
+5. **Normalise text**: Unicode NFKC; Arabic: remove diacritics and tatweel for the search copy (original kept for display), unify alef and yaa forms, keep Arabic/English mixing.
+6. **Chunk** (§11.4), **enrich** (figures §11.6), **embed**, **index** (vector + full-text).
+7. **Version**: checksum per document; only changed documents are re-embedded; previous version kept until the new one is ready.
+
+### 11.3 Parsers
+One `DocumentParser` interface; parsers are adapters.
+
+| Parser | Licence | Used for |
+|---|---|---|
+| **Docling** (primary) | MIT | PDF (digital and scanned), DOCX, PPTX, XLSX, HTML, images. Layout model, TableFormer tables, reading order, figures |
+| **Unstructured** open-source library (secondary) | Apache-2.0 | EML/MSG email, EPUB, RTF, ODT and other long-tail formats; second attempt on pages that fail Docling's quality check |
+| Arabic-capable OCR engine | To pick in K1 benchmark | Scanned Arabic pages. Docling's Arabic VLM support is experimental, so not relied on alone |
+| Own STT (nexora-audio pipeline) | Ours | Audio and video files, chunked by timestamp |
+
+Not used: PyMuPDF (AGPL-3.0), Marker (GPL-3.0), MinerU (custom licence with revenue thresholds and attribution), and Unstructured's hosted API by default (data leaves the deployment; opt-in only for customers who allow it).
+
+### 11.4 Chunking (ours, parser-independent)
+- Split on structure: section → paragraph group; tables and figures are their own chunks.
+- Target 200–400 tokens per search chunk, counted with the embedding model's tokenizer; overlap 10–15 % within a section only.
+- **Parent–child**: search matches small chunks; the parent section (up to ~1,500 tokens) goes to the model.
+- **Context prefix** stored and embedded with each chunk: `document title > section path`.
+- Metadata on every chunk: `document_id`, version, page, section path, language, source URL, created/updated date, access tags.
+
+### 11.5 Tables and spreadsheets
+| Case | Handling |
+|---|---|
+| Small table (≤ ~30 rows) | One chunk, Markdown |
+| Large table | Row groups with the header repeated, plus one sentence per row ("Column: value; …") for row-level questions. JSON copy kept for exact read-back |
+| Text-heavy sheet (FAQ, price list) | One chunk per row with sheet name and headers |
+| Number-heavy sheet | Loaded into a per-knowledge-base, sandboxed DuckDB file. Agents get a read-only `query_table` tool (text-to-SQL, SELECT only, row and time limits). Formulas read as calculated values; hidden sheets skipped unless enabled; merged header cells flattened |
+
+### 11.6 Images, charts, scans
+- Figures stored in object storage, linked to page and position.
+- OCR text of the figure + a short vision-model description are indexed with the figure chunk.
+- Charts: description includes key values, labelled approximate.
+- Chat answers may show the image; voice answers speak only the description.
+
+### 11.7 Retrieval
+1. Query rewrite (call transcripts → clean query; keep numbers and IDs verbatim).
+2. Permission and metadata filters applied **before** search.
+3. Hybrid: PostgreSQL full-text (BM25-style) + vector (HNSW), merged by reciprocal rank fusion.
+4. Rerank top 20–40 with a cross-encoder or reranking model; keep 3–6; minimum score, else return `no_answer`.
+5. Return chunks with citations (document, page, section, passage offsets).
+
+API (proposed): `POST /v1/workspaces/{ws}/knowledge-bases/{id}/retrieve`
+`{ "query", "top_k", "filters", "mode": "chat|voice", "deadline_ms" }` →
+`{ "chunks": [{ "text", "score", "citation": {...} }], "no_answer": false, "timing_ms": {...} }`.
+
+### 11.8 Voice mode
+- Deadline from the tool binding (default retrieval budget 800 ms inside the 3.5 s tool budget).
+- Cache popular queries per knowledge base (keyed by normalised query + filters + KB version).
+- Prefetch: a binding may declare a prefetch query run as soon as its inputs are known (for example after the policy number is collected).
+- Answers for voice are one or two sentences; citations go to the trace, not the audio.
+
+### 11.9 Evaluation
+- Per knowledge base: a test set of questions with expected passages. Metrics: hit rate at k, mean reciprocal rank, `no_answer` precision.
+- Runs before reindexing, embedding-model change or parser upgrade; blocks the change on a drop beyond a set threshold.
+- Answers marked wrong in calls or chats become new test questions.
+- Monitoring: failed ingestion jobs, outdated documents, questions that keep returning `no_answer`.
+
+### 11.10 Acceptance criteria
+1. A user can only retrieve chunks from knowledge bases and documents they are allowed to read (negative test across organizations and access tags).
+2. A 40-page PDF with tables and figures ingests with tables intact (row and column counts match the source) and figures described.
+3. A number-heavy XLSX answers an aggregate question correctly through `query_table`, and a write statement is rejected.
+4. Voice-mode retrieval returns within its deadline, or returns `no_answer` with `timing_ms`, never later.
+5. Changing the embedding model on a knowledge base runs the test set and reports metrics before switching.
+6. Arabic queries with and without diacritics return the same top results.

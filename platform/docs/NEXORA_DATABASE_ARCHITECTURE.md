@@ -240,6 +240,19 @@ knowledge base is fixed to one embedding model, and changing it means reindexing
 **ingestion_jobs** — `id`, `knowledge_base_id`, `document_id`, `status`, `attempts`,
 `error`, `started_at`, `finished_at`.
 
+**document_figures** — `id`, `document_id`, `organization_id`, `page`, `bbox` (jsonb),
+`object_key` (S3), `ocr_text`, `description`, `chunk_id`.
+
+**structured_tables** — spreadsheets loaded for `query_table` (Integration spec §11.5):
+`id`, `knowledge_base_id`, `document_id`, `organization_id`, `sheet_name`, `columns`
+(jsonb: name, type), `row_count`, `duckdb_object_key` (one sandboxed DuckDB file per
+knowledge base in object storage), `loaded_at`.
+
+**retrieval_tests** — `id`, `knowledge_base_id`, `organization_id`, `question`,
+`expected_chunk_ids` (text[]), `source` (`manual`, `feedback`), `created_at`.
+**retrieval_test_runs** — `id`, `knowledge_base_id`, `trigger` (`reindex`, `model_change`,
+`parser_upgrade`, `manual`), `hit_rate_at_k`, `mrr`, `no_answer_precision`, `passed`, `ran_at`.
+
 ### 3.7 Models, integrations, developer access
 **secrets** — `id`, `organization_id` (nullable for platform), `kind`, `ciphertext`
 (bytea), `wrapped_dek` (bytea), `kek_id`, `created_at`, `rotated_at`. Plaintext is

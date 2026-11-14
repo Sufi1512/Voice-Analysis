@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | Status | Draft for approval (document 3 of 6 in `NEXORA_PRODUCT_PLAN.md`) |
-| Inputs | `NEXORA_PRODUCT_PLAN.md`, `DOGRAH_DEEP_TECHNICAL_AUDIT.md` (Dograh @ `d672de2`), `DIFY_DEEP_TECHNICAL_AUDIT.md` (Dify 1.19.0 @ `3d36480`, graphon 0.8.0) |
+| Inputs | `NEXORA_FEATURES.md`, `NEXORA_PRODUCT_PLAN.md`, `DOGRAH_DEEP_TECHNICAL_AUDIT.md` (Dograh @ `d672de2`), `DIFY_DEEP_TECHNICAL_AUDIT.md` (Dify 1.19.0 @ `3d36480`, graphon 0.8.0) |
 | Decisions taken | (1) NEXORA owns the whole user experience. (2) The AI engine sits behind an adapter with two implementations: **Dify application** (single-tenant deployments) and **graphon** (shared multi-tenant SaaS). (3) Dograh is the voice engine. |
 | Companion docs | `NEXORA_DATABASE_ARCHITECTURE.md`, `NEXORA_INTEGRATION_SPECIFICATION.md`, `NEXORA_IMPLEMENTATION_ROADMAP.md` |
 

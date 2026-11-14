@@ -3,6 +3,7 @@
 | | |
 |---|---|
 | Status | Draft for approval (document 6 of 6) |
+| Features | `NEXORA_FEATURES.md` (standard vs unique) |
 | Builds on | `NEXORA_SYSTEM_ARCHITECTURE.md`, `NEXORA_DATABASE_ARCHITECTURE.md`, `NEXORA_INTEGRATION_SPECIFICATION.md` |
 | Sizing | S ≈ 1 day, M ≈ 2–4 days, L ≈ 1–2 weeks of focused work. No calendar dates: the plan defers dates until the first adapter contract tests pass |
 
@@ -92,14 +93,49 @@ deploys it and monitors everything without knowing which engine runs what.*
 ## Phase P5: Platform modules (→ R5)
 | # | Ticket | Size | Acceptance criteria |
 |---|---|---|---|
-| P5.1 | Knowledge Hub: bases, upload (PDF, DOCX, TXT, MD), URL ingestion, chunking/embedding settings, pgvector back end, retrieval test UI | L | Upload → `ready` → retrieve returns cited chunks |
-| P5.2 | `DifyDatasetKnowledge` back end for dedicated installs | M | Same API works on both back ends |
+| P5.1 | Knowledge Hub base: knowledge bases, upload, pgvector back end, Knowledge API, permissions (detail in Phase PK) | M | Upload → `ready` → retrieve returns cited chunks; Integration §11.10 #1 |
 | P5.3 | Model Hub: providers, verification, named configs, propagation to engines with status | M | Changing a key updates Dograh and the AI runtime; status per engine shown |
 | P5.4 | Integration Hub: MCP server registration, tool discovery, tool grants per agent | M | An agent without a grant cannot call a discovered tool (test) |
 | P5.5 | API keys, OAuth client credentials, rate limits, idempotency | M | DB acceptance #5; 429 with `Retry-After` |
 | P5.6 | Outgoing webhooks (signed, retried) | S | Delivery log in portal with replay |
 | P5.7 | Usage pipeline: events from engines + gateway, hourly roll-up, usage page and dashboard tiles | M | Voice minutes in NEXORA match Dograh run durations within 1 % |
 | P5.8 | Public OpenAPI, developer portal (`apps/docs`), Python + TypeScript SDKs generated and hand-polished | L | Quickstart: create voice agent → link workflow → place test call in under 15 lines of SDK code |
+
+## Phase PK: Knowledge and RAG (→ R5, spec: Integration §11)
+| # | Ticket | Size | Acceptance criteria |
+|---|---|---|---|
+| K1 | Parser benchmark on real customer documents (Arabic PDFs, scans, table-heavy policies, XLSX, email): Docling vs Unstructured OSS vs Arabic OCR candidates | M | Scores per file type for text accuracy, table structure, reading order; defaults chosen from results and recorded |
+| K2 | `DocumentParser` interface + Docling adapter + Unstructured adapter + per-page quality check and fallback | L | Failing page re-parsed by the second parser; best result kept and logged |
+| K3 | NEXORA chunker: structure-aware, parent–child, context prefix, metadata, tokenizer-based sizes | M | Same document parsed by either parser yields chunks with identical section paths |
+| K4 | Tables: small vs large tables, row sentences, JSON copy | M | Integration §11.10 #2 (row and column counts match) |
+| K5 | Figures: storage, OCR text, vision description, chart values | M | Figures searchable by their content; voice mode returns description only |
+| K6 | Structured knowledge: XLSX/CSV to sandboxed DuckDB, read-only `query_table` tool | L | Integration §11.10 #3 |
+| K7 | Arabic: normalisation, Arabic OCR engine from K1, mixed Arabic/English | M | Integration §11.10 #6 |
+| K8 | Retrieval: query rewrite, filters first, hybrid search + RRF, reranking, minimum score, citations | L | Hit rate at 5 ≥ target on the K1 test set; `no_answer` instead of low-score answers |
+| K9 | Voice mode: deadline, cache, prefetch, short answers | M | Integration §11.10 #4 |
+| K10 | Website crawler (sitemap, main content, re-crawl schedule) and email, EPUB, RTF, ODT, audio/video files | M | Each format ingests with citations back to source position |
+| K11 | Knowledge Hub UI: chunk preview, per-page re-run, search test screen | L | A user sees how a document was split and why a passage matched |
+| K12 | Retrieval tests, test runs on reindex / model change / parser upgrade, feedback from wrong answers | M | Integration §11.10 #5 |
+| K13 | `DifyDatasetKnowledge` back end for dedicated installs (was P5.2) | M | Same Knowledge API passes the same tests on both back ends |
+
+## Phase PU: NEXORA differentiators (spec: `NEXORA_FEATURES.md` §1)
+| # | Ticket | Size | Acceptance criteria |
+|---|---|---|---|
+| U2.1 | Audio quality metrics from nexora-audio per call (noise, echo, background talkers, packet loss, clipping, turn timing) into usage/executions | M | Every call has a quality record; dashboard tile and agent call list show it |
+| U2.2 | "Misheard or misunderstood" view in the trace: audio score, STT confidence, retrieval and model steps side by side | M | A test call with injected noise is classified as an audio problem, a wrong answer with clean audio as a model problem |
+| U4.1 | Answer-budget visual in trace and live lanes (budget line, holding line marker) | S | Builds on P4.3; holding line visible in trace and dashboard |
+| U6.1 | Mid-call approvals: approval inbox, push notification, approve or reject while the call waits on a holding line | M | Payment-style tool waits; approve continues the call; reject is spoken gracefully; audit written |
+| U6.2 | Masking of personal data in transcripts, traces and exports by role | M | Viewer sees masked phone numbers and IDs; Operator and above see them; export respects role |
+| U5.1 | Supervisor listen, whisper, take over, hand back | L | Supervisor joins a live call; AI resumes with full context after hand-back |
+| U3.1 | Channels: web chat widget and WhatsApp for the same agent; one publish to all channels | L | Same knowledge and tools answer on phone and chat; version shown per channel |
+| U1.1 | Failure clustering: group failed and transferred calls by cause using transcripts, traces and audio score | M | Clusters with counts and example calls on an Insights page |
+| U1.2 | Proposed fix: model drafts a flow or prompt change per cluster as a reviewable diff | M | Fix opens as a draft version, never published automatically |
+| U1.3 | Real calls to test set: selected calls replayed as simulations against the draft (synthetic caller with the original wording) | L | Draft must pass the cluster's test set before rollout |
+| U1.4 | Traffic split rollout and result report (default 10 % for 24 h) | M | Promotion only on a measured improvement; one-click rollback |
+| U7.1 | Bring your own agent: register an external agent WebSocket as a NEXORA resource with audio, monitoring and governance | M | External agent calls appear in executions, analytics and audit like native ones |
+| U8.1 | Cost per call and per outcome; latency- and cost-aware model routing within the answer budget | M | Cost per resolved call report; router never exceeds the configured latency budget in tests |
+| U9.1 | Arabic STT/TTS provider benchmark and adapters, dialect routing, Arabic/English mixing | L | Chosen providers beat the baseline on Saudi call audio; routing picks a provider per detected dialect |
+| U9.2 | Portal right-to-left layout and Hijri dates | M | All screens pass an RTL review; dates switch per user setting |
 
 ## Phase P6: Enterprise readiness (→ R6)
 | # | Ticket | Size | Acceptance criteria |
@@ -123,7 +159,7 @@ deploys it and monitors everything without knowing which engine runs what.*
 
 ## Suggested order of work
 P0 → P1 → P2.1–P2.4 → P3.1–P3.3 → P4.1–P4.3 (first cross-engine demo) → rest of P2/P3 →
-P4.4–P4.6 → P5 → P6. This front-loads the riskiest unknowns: the Dograh provisioning path,
+P4.4–P4.6 → P5 with PK (K1 parser benchmark can start any time) → PU, starting with U2.1, U4.1, U6.1 and U1.1 (the launch story) → P6. This front-loads the riskiest unknowns: the Dograh provisioning path,
 graphon maturity and the voice-to-AI latency budget.
 
 ## Top risks

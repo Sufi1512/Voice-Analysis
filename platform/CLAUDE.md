@@ -10,6 +10,8 @@ Read before changing anything:
 - `docs/NEXORA_INTEGRATION_SPECIFICATION.md`
 - `docs/NEXORA_IMPLEMENTATION_ROADMAP.md` (tickets P0.1 onward)
 - `docs/NEXORA_PRODUCT_PLAN.md`
+- `docs/NEXORA_FEATURES.md` (feature catalogue, standard vs unique)
+- Design: Signal Room canvas https://claude.ai/artifact/9w5bzWzzctRNkfz7b7ESzD
 
 Engine audits: `docs/DOGRAH_DEEP_TECHNICAL_AUDIT.md`, `docs/DIFY_DEEP_TECHNICAL_AUDIT.md`. Paths in this file are relative to `platform/`.
 

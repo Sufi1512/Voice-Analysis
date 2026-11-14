@@ -27,6 +27,8 @@ docs/               Architecture, database, integration spec, roadmap, engine au
 
 ## Docs
 - [Product plan](docs/NEXORA_PRODUCT_PLAN.md)
+- [Feature catalogue](docs/NEXORA_FEATURES.md)
+- [Design canvas: Signal Room](https://claude.ai/artifact/9w5bzWzzctRNkfz7b7ESzD)
 - [System architecture](docs/NEXORA_SYSTEM_ARCHITECTURE.md)
 - [Database architecture](docs/NEXORA_DATABASE_ARCHITECTURE.md)
 - [Integration specification](docs/NEXORA_INTEGRATION_SPECIFICATION.md)
