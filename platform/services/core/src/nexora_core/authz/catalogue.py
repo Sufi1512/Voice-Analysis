@@ -45,3 +45,25 @@ ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
 
 ROLES = tuple(ROLE_PERMISSIONS)
 WORKSPACE_MEMBER_PERMISSIONS = frozenset({"organization:read"})
+
+#: Mirrors ``roles.rank`` (migration 0001). Nobody can grant a role above their own.
+ROLE_RANK: dict[str, int] = {
+    "platform_owner": 100,
+    "org_owner": 90,
+    "org_admin": 80,
+    "workspace_admin": 70,
+    "developer": 50,
+    "operator": 40,
+    "viewer": 10,
+}
+ROLE_NAMES: dict[str, str] = {
+    "platform_owner": "Platform owner",
+    "org_owner": "Organization owner",
+    "org_admin": "Organization admin",
+    "workspace_admin": "Workspace admin",
+    "developer": "Developer",
+    "operator": "Operator",
+    "viewer": "Viewer",
+}
+#: Roles that only make sense for the whole organization (never for one workspace).
+ORGANIZATION_ONLY_ROLES = frozenset({"org_owner", "org_admin"})

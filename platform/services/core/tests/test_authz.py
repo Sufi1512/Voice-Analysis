@@ -15,11 +15,13 @@ from nexora_core.authz.catalogue import PERMISSIONS, ROLE_PERMISSIONS, ROLES, WO
 from nexora_core.authz.require import route_permission
 from nexora_core.settings import Settings
 from tests.db_harness import APP_ROLE, app_engine, as_role
+from tests.mail_harness import FakeMailer
 
 ORG_ROLES = ["org_owner", "org_admin", "workspace_admin", "developer", "operator", "viewer"]
 # A valid body for every protected route, so "allowed" means the handler ran.
 BODIES = {
     ("PATCH", "/v1/organizations/{org}"): {"name": "Org A"},
+    ("POST", "/v1/organizations/{org}/invitations"): {"email": "matrix@example.sa", "workspace_id": "ws_a1"},
     ("POST", "/v1/platform/organizations"): {
         "name": "Matrix",
         "slug": "matrix-org",
@@ -83,6 +85,7 @@ async def world(migrated):
 @pytest.fixture
 async def app(migrated, world):
     application = create_app(Settings(environment="test", database_url=as_role(migrated, APP_ROLE)))
+    application.state.mailer = FakeMailer()
     yield application
     await application.state.engine.dispose()
 

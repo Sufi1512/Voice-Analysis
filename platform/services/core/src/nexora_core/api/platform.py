@@ -12,7 +12,7 @@ from nexora_core.api.deps import Conn, Now
 from nexora_core.audit import record
 from nexora_core.authz.require import require_platform
 from nexora_core.ids import new_id
-from nexora_core.tenancy.invitations import create_invitation
+from nexora_core.tenancy.invitations import create_and_email
 
 router = APIRouter(prefix="/v1/platform")
 PlatformOwner = Annotated[str, Depends(require_platform("platform:organizations"))]
@@ -73,8 +73,15 @@ async def create_organization(
         ),
         {"i": ws_id, "o": org_id, "now": at},
     )
-    invitation, _raw = await create_invitation(  # the raw token is emailed in C8
-        conn, organization_id=org_id, email=body.owner_email, role="org_owner", invited_by=owner_id, now=at
+    invitation = await create_and_email(
+        conn,
+        request.app.state.mailer,
+        organization_id=org_id,
+        email=body.owner_email,
+        role="org_owner",
+        invited_by=owner_id,
+        now=at,
+        public_url=request.app.state.settings.public_url,
     )
     ip = request.client.host if request.client else None
     user_agent = request.headers.get("user-agent")

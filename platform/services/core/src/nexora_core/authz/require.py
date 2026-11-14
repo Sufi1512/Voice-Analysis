@@ -26,6 +26,8 @@ class Principal:
     organization_id: str
     is_platform_owner: bool
     permissions: frozenset[str]
+    #: Roles held for the whole organization (workspace-only memberships excluded).
+    org_roles: frozenset[str] = frozenset()
 
 
 def _effective(memberships: list[tuple[str, str | None]]) -> frozenset[str]:
@@ -62,7 +64,8 @@ def require(permission: str) -> Callable[..., Awaitable[Principal]]:
             raise HTTPException(
                 status_code=403, detail={"error": "forbidden", "missing_permission": permission}
             )
-        return Principal(session.user_id, org, is_platform_owner, granted)
+        org_roles = frozenset(r for r, w in rows if w is None)
+        return Principal(session.user_id, org, is_platform_owner, granted, org_roles)
 
     dependency.permission = permission  # ty: ignore[missing-attribute] - read by route_permission
     return dependency

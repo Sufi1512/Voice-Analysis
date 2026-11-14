@@ -17,6 +17,7 @@ from nexora_core.auth.sessions import create_session
 from nexora_core.bootstrap import BOOTSTRAP_TOKEN_LIFETIME, bootstrap_platform_owner
 from nexora_core.settings import Settings
 from tests.db_harness import APP_ROLE, app_engine, as_role
+from tests.mail_harness import FakeMailer
 
 EMAIL = "owner@nexora.sa"
 NOW = datetime(2026, 11, 14, 9, 0, tzinfo=UTC)
@@ -165,6 +166,7 @@ async def platform(fresh):
         }
     await engine.dispose()
     app = create_app(Settings(environment="test", database_url=as_role(fresh, APP_ROLE)))
+    app.state.mailer = FakeMailer()
     yield app, sessions
     await app.state.engine.dispose()
 

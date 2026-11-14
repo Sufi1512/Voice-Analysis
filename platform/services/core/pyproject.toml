@@ -33,6 +33,7 @@ lint = [
     "ty>=0.0.104",
 ]
 test = [
+    "aiosmtpd>=1.4.6",
     "hypothesis>=6.170.15",
     "pytest>=9.2.0",
     "pytest-asyncio>=1.5.0",

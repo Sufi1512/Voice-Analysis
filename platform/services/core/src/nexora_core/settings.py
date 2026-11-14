@@ -26,6 +26,15 @@ class Settings(BaseSettings):
     #: Key-encryption key for stored secrets: base64 of 32 random bytes. Required in production.
     kek: SecretStr = Field(default=SecretStr(""))
     kek_id: str = "local-1"
+    #: Outgoing email (plain SMTP, set at deploy time; Mailpit locally).
+    smtp_host: str = "localhost"
+    smtp_port: int = 1025
+    smtp_security: Literal["none", "starttls", "tls"] = "none"
+    smtp_username: str = ""
+    smtp_password: SecretStr = Field(default=SecretStr(""))
+    smtp_from: str = "NEXORA <no-reply@localhost>"
+    #: Base URL of the portal, for links in emails.
+    public_url: str = "https://localhost:3000"
     #: First platform owner, created on first start with a single-use set-password token.
     bootstrap_owner_email: str = ""
     #: Where that token is written (mode 0600). Mount a private volume here in production.
@@ -58,4 +67,6 @@ class Settings(BaseSettings):
             raise ValueError(f"session_secret must be at least {MIN_SECRET_LENGTH} characters in production")
         if self.environment == "production" and not self.kek.get_secret_value():
             raise ValueError("kek is required in production")
+        if self.environment == "production" and self.smtp_security == "none":
+            raise ValueError("smtp_security must be starttls or tls in production")
         return self

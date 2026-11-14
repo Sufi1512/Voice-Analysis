@@ -12,15 +12,17 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from nexora_core.api.auth import router as auth_router
+from nexora_core.api.invitations import router as invitations_router
 from nexora_core.api.organizations import router as organizations_router
 from nexora_core.api.platform import router as platform_router
 from nexora_core.auth.csrf import CsrfMiddleware
 from nexora_core.bootstrap import bootstrap_platform_owner
 from nexora_core.logging import configure_logging, get_logger
+from nexora_core.mail import Mailer, MailError
 from nexora_core.settings import Settings
 
 log = get_logger(__name__)
-ROUTERS: tuple[APIRouter, ...] = (auth_router, organizations_router, platform_router)
+ROUTERS: tuple[APIRouter, ...] = (auth_router, organizations_router, invitations_router, platform_router)
 READY_TIMEOUT_S = 2.0
 
 
@@ -45,10 +47,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.settings = settings
     app.state.engine = engine
     app.state.clock = lambda: datetime.now(UTC)
+    app.state.mailer = Mailer(settings)
     app.add_middleware(CsrfMiddleware)
     app.state.routers = ROUTERS
     for router in ROUTERS:
         app.include_router(router)
+
+    @app.exception_handler(MailError)
+    async def mail_error(_request: Request, _exc: MailError) -> JSONResponse:
+        return JSONResponse(status_code=502, content={"error": "email_failed"})
 
     @app.exception_handler(HTTPException)
     async def http_error(_request: Request, exc: HTTPException) -> JSONResponse:
