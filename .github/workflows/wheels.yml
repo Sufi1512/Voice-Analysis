@@ -1,0 +1,47 @@
+name: wheels
+
+# E7: one nexora-audio wheel per platform, each with only its own native libraries, then a
+# clean install and the test suite on that platform. Run on demand or for a release tag.
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["nexora-audio-v*"]
+
+jobs:
+  wheel:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {os: ubuntu-24.04, plat: linux-x86_64}
+          - {os: ubuntu-24.04-arm, plat: linux-aarch64}
+          - {os: macos-14, plat: darwin-aarch64}
+          - {os: macos-15-intel, plat: darwin-x86_64}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.13"}
+      - name: Keep only this platform's native libraries
+        working-directory: nexora-audio
+        run: |
+          test -d src/nexora_audio/_native/${{ matrix.plat }} || { echo "no libraries for ${{ matrix.plat }} committed yet"; exit 1; }
+          find src/nexora_audio/_native -mindepth 1 -maxdepth 1 -type d ! -name licenses ! -name ${{ matrix.plat }} -exec rm -rf {} +
+      - name: Build wheel
+        working-directory: nexora-audio
+        env: {NEXORA_WHEEL_PLATFORM: "${{ matrix.plat }}"}
+        run: pip install build && python -m build --wheel --outdir dist
+      - name: Install in a clean venv and test
+        run: |
+          if [ "$RUNNER_OS" = Linux ]; then sudo apt-get install -y --no-install-recommends libopus0; else brew install opus; fi
+          python -m venv /tmp/clean
+          /tmp/clean/bin/pip install nexora-audio/dist/*.whl "pytest>=8" "soundfile>=0.12" "websockets>=12" "hatchling>=1.24"
+          cd /tmp && /tmp/clean/bin/python -c "import nexora_audio as n; s=n.StreamSession(echo_cancellation=True); print(n.__version__, s.backends)"
+          mkdir -p /tmp/wt && cp -r "$GITHUB_WORKSPACE/nexora-audio/tests" /tmp/wt/tests
+          cd /tmp/wt && /tmp/clean/bin/python -m pytest -q -p no:cacheprovider tests --ignore=tests/unit/test_qualitylab.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheel-${{ matrix.plat }}
+          path: nexora-audio/dist/*.whl

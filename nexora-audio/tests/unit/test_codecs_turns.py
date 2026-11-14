@@ -1,4 +1,6 @@
 import hashlib
+from concurrent.futures import Future
+from typing import Any
 
 import numpy as np
 import pytest
@@ -248,3 +250,58 @@ def test_text_cue_words() -> None:
         assert sounds_unfinished(text), text
     for text in ["", "Yes, I can.", "what for?", "come in", "hmm", "بس", "thank you"]:
         assert not sounds_unfinished(text), text
+
+
+class TestBackgroundJudge:
+    """A judge may return a Future (model on another thread); same decisions as in-line."""
+
+    CFG = TurnConfig(complete_silence_ms=300, incomplete_silence_ms=2000)
+
+    def gap(self, make: Any) -> float:
+        t = TurnTracker(self.CFG, judge=make)
+        ev = feed(t, [(0.9, 1600), (0.0, 3000)])
+        last = dict(ev)["speech_end"]
+        return next(time for kind, time in ev if kind == "end_of_turn") - last
+
+    def test_ready_future_is_used(self) -> None:
+        def judge(a: float, b: float) -> Future[float | None]:
+            f: Future[float | None] = Future()
+            f.set_result(0.1)  # unfinished
+            return f
+
+        assert self.gap(judge) == pytest.approx(2016, abs=40)
+
+    def test_late_future_is_waited_for_before_ending_the_turn(self) -> None:
+        import threading
+
+        def judge(a: float, b: float) -> Future[float | None]:
+            f: Future[float | None] = Future()
+            threading.Timer(0.2, f.set_result, args=(0.1,)).start()  # arrives late
+            return f
+
+        assert self.gap(judge) == pytest.approx(2016, abs=40)  # never ended early
+
+    def test_failed_future_falls_back_to_the_plain_rule(self) -> None:
+        def judge(a: float, b: float) -> Future[float | None]:
+            f: Future[float | None] = Future()
+            f.set_exception(RuntimeError("model crashed"))
+            return f
+
+        assert self.gap(judge) == pytest.approx(704, abs=40)
+
+
+def test_session_background_judge_matches_inline() -> None:
+    from nexora_audio import StreamSession
+    from tests.audio_fixtures import speech
+
+    x = np.concatenate([speech(16000), np.zeros(48000, np.float32)])
+    data = (np.clip(x, -1, 1) * 32767).astype(np.int16).tobytes()
+    out = []
+    for bg in (False, True):
+        with StreamSession(judge_in_background=bg) as s:
+            ev = []
+            for i in range(0, len(data), 640):
+                ev += s.process(data[i : i + 640]).events
+            ev += s.flush().events
+        out.append([(e.type, e.time_ms) for e in ev if e.type == "end_of_turn"])
+    assert out[0] == out[1] and out[0]

@@ -19,6 +19,7 @@ from __future__ import annotations
 import asyncio
 import threading
 import time
+from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
 from math import gcd
 from types import TracebackType
@@ -64,6 +65,9 @@ class StreamSession:
         turns: Turn/interruption settings, or ``None`` to disable turn events.
         loss_concealment: Conceal lost packets that arrive as digital silence, and enable
             :meth:`conceal` (mono streams).
+        judge_in_background: Run the Smart Turn model on its own thread so ``process()``
+            never waits ~45 ms for it at a pause (use for live audio; the default keeps
+            results independent of timing).
     """
 
     def __init__(
@@ -75,9 +79,16 @@ class StreamSession:
         turns: TurnConfig | None = TurnConfig(),  # noqa: B008 - immutable dataclass
         loss_concealment: bool = True,
         registry: BackendRegistry | None = None,
+        judge_in_background: bool = False,
         **settings: Any,
     ) -> None:
         self.input_format = input_format or AudioFormat()
+        # Smart Turn takes ~45 ms per pause; real-time callers run it on its own thread so
+        # process() never stalls (the verdict is used when ready). Offline use keeps it
+        # synchronous, so results do not depend on timing.
+        self._judge_pool = (
+            ThreadPoolExecutor(1, thread_name_prefix="nexora-turn") if judge_in_background else None
+        )
         default_out = (
             AudioFormat("pcm16", self.input_format.sample_rate, self.input_format.channels)
             if self.input_format.packetized
@@ -351,6 +362,8 @@ class StreamSession:
         with self._lock:
             if not self.closed:
                 self._audio.close()
+                if self._judge_pool is not None:
+                    self._judge_pool.shutdown(wait=False, cancel_futures=True)
                 self.closed = True
 
     # -- context managers ---------------------------------------------------------
@@ -389,7 +402,7 @@ class StreamSession:
         self._ring = np.concatenate([self._ring, mono.astype(np.float32)])[-self._ring_keep :]
         self._ring_end += out.shape[1]
 
-    def _judge(self, start_ms: float, end_ms: float) -> float | None:
+    def _judge(self, start_ms: float, end_ms: float) -> float | Future[float | None] | None:
         """Smart Turn on the processed caller audio between two input-timeline times."""
         rate = self.input_format.sample_rate
         lat = self._latency_ms
@@ -402,6 +415,10 @@ class StreamSession:
         if rate != smart_turn.MODEL_RATE:
             g = gcd(rate, smart_turn.MODEL_RATE)
             x = resample_poly(x, smart_turn.MODEL_RATE // g, rate // g).astype(np.float32)
+        else:
+            x = x.copy()  # the ring keeps changing; the background job needs its own copy
+        if self._judge_pool is not None:
+            return self._judge_pool.submit(smart_turn.complete_probability, x)
         return smart_turn.complete_probability(x)
 
     def _collect_events(self) -> list[TurnEvent]:

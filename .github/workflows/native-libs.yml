@@ -1,0 +1,48 @@
+name: native-libs
+
+# E7: build the bundled native libraries (RNNoise, DeepFilterNet libdf, WebRTC AEC3) on each
+# platform from pinned sources, then run the nexora-audio tests on that platform with them.
+# The built libraries are uploaded as artifacts and committed to
+# nexora-audio/src/nexora_audio/_native/<platform>/ after review.
+
+on:
+  push:
+    branches: [main]
+    paths: ["nexora-audio/native/**", ".github/workflows/native-libs.yml"]
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {os: ubuntu-24.04-arm, tag: linux-aarch64}
+          - {os: macos-14, tag: darwin-aarch64}
+          - {os: macos-15-intel, tag: darwin-x86_64}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.13"}
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build tools
+        run: |
+          pip install meson ninja
+          if [ "$RUNNER_OS" = macOS ]; then brew install autoconf automake libtool opus; fi
+      - name: Build
+        run: nexora-audio/native/build_native.sh "$RUNNER_TEMP/native"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-${{ matrix.tag }}
+          path: ${{ runner.temp }}/native/${{ matrix.tag }}
+      - name: Test with these libraries
+        working-directory: nexora-audio
+        run: |
+          mkdir -p src/nexora_audio/_native/${{ matrix.tag }}
+          cp "$RUNNER_TEMP/native/${{ matrix.tag }}"/lib* src/nexora_audio/_native/${{ matrix.tag }}/
+          if [ "$RUNNER_OS" = Linux ]; then sudo apt-get install -y --no-install-recommends libopus0; fi
+          pip install -e ".[dev]"
+          python -c "import nexora_audio as n; s=n.StreamSession(echo_cancellation=True); print(s.backends)"
+          pytest -q

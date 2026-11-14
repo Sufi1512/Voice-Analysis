@@ -23,14 +23,17 @@ based: a short "stop!" and a short "yeah" look the same. Tune the timings for yo
 from __future__ import annotations
 
 from collections.abc import Callable
+from concurrent.futures import Future
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
 from nexora_audio.streaming.text_cues import sounds_unfinished
 
-Judge = Callable[[float, float], float | None]
+Judge = Callable[[float, float], "float | Future[float | None] | None"]
 """``judge(start_ms, end_ms)`` -> probability (0-1) that the turn in that span is finished,
-or ``None`` if it cannot tell."""
+or ``None`` if it cannot tell. It may return a ``Future`` instead (the model runs on another
+thread so real-time audio is never held up); the verdict is used once it is ready, and the
+tracker only waits for it if the turn would otherwise end first."""
 
 EventType = Literal["speech_start", "speech_end", "end_of_turn", "interruption", "backchannel"]
 
@@ -90,6 +93,7 @@ class TurnTracker:
         self._turn_start = 0.0
         self._interrupted = False
         self._verdict: float | None = None
+        self._pending: Future[float | None] | None = None
         self._text_unfinished = False
 
     def set_transcript(self, text: str) -> None:
@@ -122,7 +126,7 @@ class TurnTracker:
                     # within a turn the last transcript stands until a newer one: the VAD
                     # can still be catching up with words the STT has already sent
                     self._turn_open = True
-                    self._verdict = None
+                    self._verdict, self._pending = None, None  # the caller went on
                     events.append(TurnEvent("speech_start", self._speech_start))
             if (
                 self.in_speech
@@ -151,12 +155,20 @@ class TurnTracker:
                     try:
                         # up to the last voiced window: trailing silence makes the model
                         # call unfinished sentences finished (measured, see E5_SPEC.md)
-                        self._verdict = self.judge(
+                        got = self.judge(
                             max(self._turn_start - c.pre_speech_ms, 0.0), self._last_voice
                         )
                     except Exception:  # a broken judge must never stop turn-taking
-                        self._verdict = None
+                        got = None
+                    if isinstance(got, Future):
+                        self._verdict, self._pending = None, got
+                    else:
+                        self._verdict, self._pending = got, None
+            self._resolve(block=False)
             wait = self._wait_ms()
+            if self._pending is not None and self._turn_open and silence >= wait:
+                self._resolve(block=True)  # the turn would end now: hear the verdict first
+                wait = self._wait_ms()
             if (
                 self._turn_open
                 and not self.in_speech
@@ -171,12 +183,12 @@ class TurnTracker:
                 events.append(TurnEvent("end_of_turn", end_ms, data))
                 self._turn_open = False
                 self._turn_speech_ms = 0.0
-                self._verdict, self._text_unfinished = None, False
+                self._verdict, self._pending, self._text_unfinished = None, None, False
             elif self._turn_open and not self.in_speech and silence >= wait:
                 # too little speech for a turn (e.g. only backchannels): drop it quietly
                 self._turn_open = False
                 self._turn_speech_ms = 0.0
-                self._verdict, self._text_unfinished = None, False
+                self._verdict, self._pending, self._text_unfinished = None, None, False
         else:
             # between thresholds: keeps the current state, counts as neither
             if not self.in_speech:
@@ -188,6 +200,7 @@ class TurnTracker:
         The event carries ``stream_end: True``."""
         c = self.config
         events: list[TurnEvent] = []
+        self._resolve(block=True)
         if self.in_speech:
             self.in_speech = False
             duration = self._last_voice - self._speech_start
@@ -205,8 +218,19 @@ class TurnTracker:
                 data["text_unfinished"] = True
             events.append(TurnEvent("end_of_turn", max(time_ms, self._last_voice), data))
         self._turn_open, self._turn_speech_ms, self._verdict = False, 0.0, None
-        self._text_unfinished = False
+        self._pending, self._text_unfinished = None, False
         return events
+
+    def _resolve(self, block: bool) -> None:
+        """Take a background verdict once it is ready (or wait for it, up to 1 s)."""
+        fut = self._pending
+        if fut is None or not (block or fut.done()):
+            return
+        self._pending = None
+        try:
+            self._verdict = fut.result(timeout=1.0)
+        except Exception:  # timeout or model error: fall back to the plain rule
+            self._verdict = None
 
     def _wait_ms(self) -> float:
         """Silence needed before the open turn ends."""
