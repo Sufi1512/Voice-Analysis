@@ -194,7 +194,10 @@ def test_agent_mode_plays_agent_audio_and_returns_clean_mic() -> None:
 @pytest.mark.device
 def test_real_sound_card_round_trip() -> None:
     """Run on your machine: ``pytest -m device``. Speak for 3 seconds."""
-    sd = pytest.importorskip("sounddevice")
+    try:
+        import sounddevice as sd  # raises OSError, not ImportError, without PortAudio
+    except (ImportError, OSError) as exc:
+        pytest.skip(f"sounddevice unavailable: {exc}")
     try:
         sd.query_devices(kind="input")
     except Exception as exc:  # no PortAudio device here

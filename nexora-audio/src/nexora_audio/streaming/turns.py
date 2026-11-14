@@ -66,6 +66,11 @@ class TurnConfig:
     incomplete_silence_ms: float = 2000.0  # sounds unfinished: wait this long
     pre_speech_ms: float = 300.0  # audio before the turn's first word given to the judge
     text_cue: bool = True  # a transcript ending "...of", "...and", "um" waits the long wait
+    # a semantic end-of-utterance verdict sent with the transcript (set_transcript's
+    # ``complete``, e.g. from a text end-of-turn model or the LLM) overrides the audio
+    # judge: True replies after complete_silence_ms, False waits incomplete_silence_ms.
+    # An unfinished last word (text_cue) still wins over True.
+    transcript_hint: bool = True
 
 
 class TurnTracker:
@@ -95,13 +100,23 @@ class TurnTracker:
         self._verdict: float | None = None
         self._pending: Future[float | None] | None = None
         self._text_unfinished = False
+        self._text_complete: bool | None = None
 
-    def set_transcript(self, text: str) -> None:
+    def set_transcript(self, text: str, complete: bool | None = None) -> None:
         """The caller's latest (interim or final) transcript for the current turn. If its
-        last word cannot end a sentence, the turn waits ``incomplete_silence_ms``. Ignored
-        when no turn is open: a late final for a turn that already ended."""
-        if self._turn_open and self.config.text_cue:
+        last word cannot end a sentence, the turn waits ``incomplete_silence_ms``.
+
+        ``complete`` is an optional semantic verdict on the transcript (is the caller's
+        sentence finished?), from a text end-of-utterance model or your LLM. It decides
+        the wait instead of the audio judge, which matters where the audio judge is weak
+        (measured: Arabic, E5c). Not a silence endpoint: an STT's silence-based "final"
+        fires at mid-sentence pauses too. Ignored when no turn is open."""
+        if not self._turn_open:
+            return
+        if self.config.text_cue:
             self._text_unfinished = sounds_unfinished(text)
+        if self.config.transcript_hint and complete is not None:
+            self._text_complete = bool(complete)
 
     def set_agent_speaking(self, speaking: bool, time_ms: float = 0.0) -> None:
         self.agent_speaking = speaking
@@ -124,7 +139,9 @@ class TurnTracker:
                         self._turn_start = self._speech_start
                         self._text_unfinished = False
                     # within a turn the last transcript stands until a newer one: the VAD
-                    # can still be catching up with words the STT has already sent
+                    # can still be catching up with words the STT has already sent. A
+                    # "complete" verdict does not: the caller went on after it.
+                    self._text_complete = None
                     self._turn_open = True
                     self._verdict, self._pending = None, None  # the caller went on
                     events.append(TurnEvent("speech_start", self._speech_start))
@@ -180,15 +197,19 @@ class TurnTracker:
                     data["complete_probability"] = round(self._verdict, 3)
                 if self._text_unfinished:
                     data["text_unfinished"] = True
+                if self._hint() is not None:
+                    data["transcript_complete"] = self._hint()
                 events.append(TurnEvent("end_of_turn", end_ms, data))
                 self._turn_open = False
                 self._turn_speech_ms = 0.0
                 self._verdict, self._pending, self._text_unfinished = None, None, False
+                self._text_complete = None
             elif self._turn_open and not self.in_speech and silence >= wait:
                 # too little speech for a turn (e.g. only backchannels): drop it quietly
                 self._turn_open = False
                 self._turn_speech_ms = 0.0
                 self._verdict, self._pending, self._text_unfinished = None, None, False
+                self._text_complete = None
         else:
             # between thresholds: keeps the current state, counts as neither
             if not self.in_speech:
@@ -216,9 +237,11 @@ class TurnTracker:
                 data["complete_probability"] = round(self._verdict, 3)
             if self._text_unfinished:
                 data["text_unfinished"] = True
+            if self._hint() is not None:
+                data["transcript_complete"] = self._hint()
             events.append(TurnEvent("end_of_turn", max(time_ms, self._last_voice), data))
         self._turn_open, self._turn_speech_ms, self._verdict = False, 0.0, None
-        self._pending, self._text_unfinished = None, False
+        self._pending, self._text_unfinished, self._text_complete = None, False, None
         return events
 
     def _resolve(self, block: bool) -> None:
@@ -232,11 +255,19 @@ class TurnTracker:
         except Exception:  # timeout or model error: fall back to the plain rule
             self._verdict = None
 
+    def _hint(self) -> bool | None:
+        """The transcript's verdict for the current pause (cleared when the caller starts
+        speaking again: it was about the words before)."""
+        return self._text_complete
+
     def _wait_ms(self) -> float:
         """Silence needed before the open turn ends."""
         c = self.config
         if self._text_unfinished:
             return c.incomplete_silence_ms
+        hint = self._hint()
+        if hint is not None:
+            return c.complete_silence_ms if hint else c.incomplete_silence_ms
         if self._verdict is None:
             return c.end_of_turn_ms
         if self._verdict >= c.smart_turn_threshold:

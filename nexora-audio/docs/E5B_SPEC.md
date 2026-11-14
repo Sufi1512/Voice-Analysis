@@ -140,3 +140,53 @@ What this shows:
 Gates: `tts_cutoff_en`, `tts_cutoff_ar` (target 3%), `tts_reply_gap_en`, `tts_reply_gap_ar`
 (target 800 ms), report-only. They only run where the synthetic set has been generated
 (not in CI).
+
+## Arabic reply delay: semantic end-of-utterance verdict (bug round, 2026-11-14, I-013)
+
+**Why Arabic replies wait 2 s.** Smart Turn's "finished" probability on the synthetic Arabic
+calls barely separates real sentence ends from mid-sentence pauses (recorded per verdict):
+
+| | Mid-sentence pauses | Real sentence ends |
+| --- | --- | --- |
+| English: share judged finished (≥ 0.5) | 11 / 22 | 21 / 26 |
+| Arabic: share judged finished (≥ 0.5) | 7 / 20 | 10 / 24 |
+| Arabic real ends scoring below 0.11 | | 10 / 24 |
+
+No threshold or wait setting fixes that from audio: lowering the threshold lets mid-sentence
+pauses through as fast as it lets sentence ends through. Whether it is this synthetic voice
+or Smart Turn on Arabic, only real Arabic speech can tell; multilingual Whisper base could
+barely transcribe this voice either, a hint that the voice is part of the problem.
+
+**Punctuation is no way out.** Multilingual Whisper (base) transcripts of the Arabic calls
+contain no punctuation at all, so a "transcript ends with . or ؟" rule never fires.
+
+**What was built.** The caller's transcript can carry a semantic verdict:
+`StreamSession.push_transcript(text, complete=True|False)`, `{"type": "transcript", "text":
+"...", "complete": true}` on the WebSocket, `send_transcript(text, complete=...)` in the client.
+It decides the wait instead of Smart Turn's audio verdict: `true` replies after
+`complete_silence_ms`, `false` waits `incomplete_silence_ms`. An unfinished last word (the
+text cue) still wins over `true`. The verdict holds for the current pause and is dropped when
+the caller starts speaking again. `TurnConfig.transcript_hint` (default on) turns it off.
+Without `complete`, nothing changes.
+
+It must be a **semantic** verdict on the words (a text end-of-utterance model, or the agent's
+LLM asked "is this sentence finished?"), not an STT's silence-based "final"/endpoint, which
+fires at mid-sentence pauses too.
+
+**Measured** (synthetic calls, 50 turns; verdict sent with the transcript 300 ms into each pause):
+
+| Turn decision | EN cut-offs | AR cut-offs | EN reply gap, median / p90 | AR reply gap, median / p90 |
+| --- | --- | --- | --- | --- |
+| Smart Turn + text cue (default, no verdict) | 18% | 5% | 696 / 1994 ms | **1902** / 2018 ms |
+| + correct verdict | 0% | 0% | 690 / 730 ms | **677** / 720 ms |
+| + verdict wrong 1 time in 5 | 9% | 10% | 697 / 2004 ms | **684** / 1976 ms |
+
+A verdict that is right 4 times in 5 brings Arabic replies from 1.9 s to 0.7 s (median), at
+10% cut-offs instead of 5%. `python -m qualitylab run --profile full --only turns_tts --set
+lab_transcript_hint=perfect|wrong20` reproduces it.
+
+**Still open.** Real Arabic speech to see whether Smart Turn itself is weak on Arabic, and
+which Arabic text end-of-utterance model to recommend (I-013, I-001). Openly downloadable
+conversational Arabic telephone speech was not found: Defined.ai, LDC (Fisher Levantine,
+Multi-Language CTS 2011) and Unidata sell it; the UFAL North Levantine corpus is
+non-commercial (CC BY-NC-SA 4.0).

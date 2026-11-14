@@ -17,7 +17,10 @@ Client control messages (JSON text): ``{"type": "agent_speaking", "value": true}
 ``{"type": "agent_audio", "data": "<base64>"}`` (the agent audio just played to the caller,
 in the stream's input format: the echo reference), ``{"type": "transcript", "text": "..."}``
 (the caller's latest speech-to-text for the current turn: if it ends on a word no sentence
-can end on, such as "...of" or "um", the turn waits longer before ``end_of_turn``),
+can end on, such as "...of" or "um", the turn waits longer before ``end_of_turn``; an
+optional ``"complete": true|false`` is a semantic verdict on whether the sentence is
+finished, from a text end-of-utterance model or the LLM, and decides the wait instead of
+Smart Turn's audio verdict),
 ``{"type": "flush"}``, ``{"type": "reset"}``, ``{"type": "end"}``, ``{"type": "ping"}``.
 In Relay mode the agent can send ``transcript`` on its socket; it is used, not forwarded.
 
@@ -510,7 +513,14 @@ async def _control(run: _Run, text: str) -> tuple[str, dict[str, Any] | None]:
                 "code": 4400,
                 "message": f"transcript.text must be text, at most {MAX_TRANSCRIPT_CHARS} chars",
             }
-        run.session.push_transcript(text)
+        complete = msg.get("complete")
+        if complete is not None and not isinstance(complete, bool):
+            return "error", {
+                "type": "error",
+                "code": 4400,
+                "message": "transcript.complete must be true, false or absent",
+            }
+        run.session.push_transcript(text, complete)
         return "ok", None
     if kind == "ping":
         return "ok", {"type": "pong", "audio_seconds": round(run.audio_s, 3)}
@@ -659,8 +669,11 @@ async def _relay_loop(
                         elif data.get("type") == "transcript":  # for Nexora, not the caller
                             forward = False
                             text = data.get("text")
+                            done = data.get("complete")
                             if isinstance(text, str) and len(text) <= MAX_TRANSCRIPT_CHARS:
-                                run.session.push_transcript(text)
+                                run.session.push_transcript(
+                                    text, done if isinstance(done, bool) else None
+                                )
                     if forward and ws.application_state == WebSocketState.CONNECTED:
                         await ws.send_text(msg)
         except websockets.ConnectionClosed:

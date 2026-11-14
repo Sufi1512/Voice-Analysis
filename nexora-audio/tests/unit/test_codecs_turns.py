@@ -192,6 +192,66 @@ def test_smart_turn_model_judges_real_speech() -> None:
     )
 
 
+class TestTranscriptHint:
+    """A semantic end-of-utterance verdict sent with the transcript decides the wait
+    instead of the audio judge (bug round, I-013: Smart Turn is weak on Arabic)."""
+
+    def run(
+        self,
+        audio_says: float,
+        text: str = "أريد أن أحجز رحلة إلى الرياض",
+        complete: bool | None = None,
+        *,
+        hint: bool = True,
+        resume: bool = False,
+        at: float = 1600 + 96,
+    ) -> list[float]:
+        cfg = TurnConfig(complete_silence_ms=300, incomplete_silence_ms=2000, transcript_hint=hint)
+        t = TurnTracker(cfg, judge=lambda a, b: audio_says)
+        now, last_voice, gaps = 0.0, 0.0, []
+        # resume: the caller goes on 600 ms into the pause, after the verdict arrived
+        segs = [(0.9, 1600), (0.0, 600), (0.9, 800), (0.0, 3000)]
+        if not resume:
+            segs = [(0.9, 1600), (0.0, 3000)]
+        for p, dur in segs:
+            for _ in range(round(dur / 32)):
+                if now == at:  # transcript + verdict (default: ~100 ms into the first pause)
+                    t.set_transcript(text, complete)
+                for e in t.update(now, p):
+                    if e.type == "speech_end":
+                        last_voice = e.time_ms
+                    if e.type == "end_of_turn":
+                        gaps.append(e.time_ms - last_voice)
+                        if complete is not None and hint and not resume:
+                            assert e.data["transcript_complete"] is complete
+                now += 32
+        return gaps
+
+    def test_complete_overrides_an_unsure_audio_judge(self) -> None:
+        assert self.run(0.05) == [pytest.approx(2016, abs=40)]  # audio alone: slow reply
+        assert self.run(0.05, complete=True) == [pytest.approx(320, abs=40)]
+
+    def test_not_complete_overrides_a_confident_audio_judge(self) -> None:
+        assert self.run(0.95) == [pytest.approx(320, abs=40)]
+        assert self.run(0.95, complete=False) == [pytest.approx(2016, abs=40)]
+
+    def test_an_unfinished_last_word_still_wins(self) -> None:
+        assert self.run(0.05, "ممكن تساعدني في", complete=True) == [pytest.approx(2016, abs=40)]
+
+    def test_a_verdict_goes_stale_when_the_caller_goes_on(self) -> None:
+        # "not complete" at the first pause, the caller goes on after 600 ms: the next
+        # pause is judged by the audio again (here: finished, so the short wait)
+        assert self.run(0.95, complete=False, resume=True) == [pytest.approx(320, abs=40)]
+
+    def test_a_verdict_just_before_the_pause_still_counts(self) -> None:
+        # the STT (or audio still queued on a busy server) can put the verdict before the
+        # voice detector hears the pause: it applies to that pause
+        assert self.run(0.05, complete=True, at=1600 - 160) == [pytest.approx(320, abs=40)]
+
+    def test_hints_can_be_turned_off(self) -> None:
+        assert self.run(0.05, complete=True, hint=False) == [pytest.approx(2016, abs=40)]
+
+
 class TestTranscriptCue:
     """A transcript ending on a word no sentence ends on holds the turn (E5b)."""
 

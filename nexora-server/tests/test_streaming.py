@@ -379,6 +379,33 @@ def test_transcript_must_be_text(client: Any) -> None:
     assert err["type"] == "error" and "transcript" in err["message"]
 
 
+def test_transcript_verdict_is_passed_through(client: Any) -> None:
+    """A semantic verdict reaches turn-taking: "not complete" holds the turn through the
+    1.5 s of silence after the speech, like an unfinished word does."""
+    _, key = new_org(client)
+    audio = speech_pcm16(pad_s=0.0) + bytes(2 * 16000 * 3 // 2)
+    speech_bytes = len(audio) - 2 * 16000 * 3 // 2
+    with client.websocket_connect("/v1/stream", headers=bearer(key)) as ws:
+        ws.receive_json()
+        cs = chunks(audio)
+        n_speech = speech_bytes // len(cs[0])
+        for c in cs[:n_speech]:
+            ws.send_bytes(c)
+        for c in cs[n_speech : n_speech + 15]:  # an STT verdict lands ~300 ms into the pause
+            ws.send_bytes(c)
+        ws.send_text(json.dumps({"type": "transcript", "text": "شكرا", "complete": False}))
+        for c in cs[n_speech + 15 :]:
+            ws.send_bytes(c)
+        ws.send_text(json.dumps({"type": "transcript", "text": "x", "complete": "yes"}))
+        ws.send_text(json.dumps({"type": "end"}))
+        msgs, _, code = drain(ws)
+    assert code == 1000
+    errors = [m for m in msgs if m.get("type") == "error"]
+    assert errors and "complete" in errors[0]["message"]
+    eots = [m for m in msgs if m.get("type") == "end_of_turn"]
+    assert eots and eots[-1].get("transcript_complete") is False and eots[-1].get("stream_end")
+
+
 def test_relay_agent_transcript_is_used_not_forwarded(client: Any) -> None:
     import time
 

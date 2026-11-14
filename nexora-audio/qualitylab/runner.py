@@ -64,6 +64,10 @@ def process(case: Case, settings: dict[str, Any], stt_text: bool = False) -> dic
     the run overrides ``echo_cancellation``; the agent audio is pushed as the reference."""
     if case.set == "echo" and "echo_cancellation" not in settings:
         settings = {**settings, "echo_cancellation": True}
+    # lab only: send a semantic end-of-utterance verdict with each scripted transcript,
+    # as a text end-of-turn model would ("perfect", or "wrong20": wrong 1 time in 5)
+    settings = dict(settings)
+    hint_mode = settings.pop("lab_transcript_hint", None)
     fmt = AudioFormat(encoding=case.encoding, sample_rate=case.rate)  # type: ignore[arg-type]
     wire = encode(case.mic[None, :], fmt)
     step = fmt.bytes_for_ms(CHUNK_MS)
@@ -74,6 +78,7 @@ def process(case: Case, settings: dict[str, Any], stt_text: bool = False) -> dic
     ref_fmt = AudioFormat(encoding="float32", sample_rate=case.rate)
     texts = turn_transcripts(case) if stt_text else []
     end_text = texts[-1][1] if texts else None
+    verdicts = _verdicts(case, len(texts), hint_mode)
     with StreamSession(input_format=fmt, **settings) as sess:
         latency_ms = sess.latency_ms
         speaking = False
@@ -93,7 +98,7 @@ def process(case: Case, settings: dict[str, Any], stt_text: bool = False) -> dic
                 sess.set_agent_speaking(now)
                 speaking = now
             while texts and texts[0][0] <= t:
-                sess.push_transcript(texts.pop(0)[1])
+                sess.push_transcript(texts.pop(0)[1], verdicts.pop(0))
             t0 = time.perf_counter()
             res = sess.process(wire[i : i + step])
             times.append(time.perf_counter() - t0)
@@ -112,6 +117,19 @@ def process(case: Case, settings: dict[str, Any], stt_text: bool = False) -> dic
         "backends": backends,
         "end_text": end_text,
     }
+
+
+def _verdicts(case: Case, n: int, mode: str | None) -> list[bool | None]:
+    """Semantic verdicts for the scripted transcripts: the sentence is finished at the end
+    and at a pause between two sentences, not at a mid-sentence pause."""
+    if mode is None or "texts" not in case.labels:
+        return [None] * n
+    truth = [case.meta.get("kind") == "sentence"] * (n - 1) + [True]
+    if mode == "perfect":
+        return list(truth)
+    if mode == "wrong20":
+        return [v != (zlib.crc32(f"{case.id}#{i}".encode()) % 5 == 0) for i, v in enumerate(truth)]
+    raise ValueError(f"lab_transcript_hint: unknown mode {mode!r}")
 
 
 _STT_MEMO: dict[int, str] = {}

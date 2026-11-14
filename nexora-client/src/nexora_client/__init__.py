@@ -82,10 +82,17 @@ class NexoraStream:
         """Process mode: tell Nexora your agent is playing audio (enables interruption events)."""
         await self._ws.send(json.dumps({"type": "agent_speaking", "value": speaking}))
 
-    async def send_transcript(self, text: str) -> None:
+    async def send_transcript(self, text: str, complete: bool | None = None) -> None:
         """Process mode: the caller's latest speech-to-text for the current turn. A turn whose
-        text ends on a word no sentence can end on ("...a flight to", "um") waits longer."""
-        await self._ws.send(json.dumps({"type": "transcript", "text": text}))
+        text ends on a word no sentence can end on ("...a flight to", "um") waits longer.
+
+        ``complete``: optionally, your semantic verdict on whether the sentence is finished
+        (a text end-of-utterance model or the LLM). It decides the wait instead of the audio
+        model; useful where that is weak (Arabic). Not a silence-based STT "final"."""
+        msg: dict[str, Any] = {"type": "transcript", "text": text}
+        if complete is not None:
+            msg["complete"] = complete
+        await self._ws.send(json.dumps(msg))
 
     async def flush(self) -> None:
         await self._ws.send(json.dumps({"type": "flush"}))

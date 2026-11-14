@@ -313,16 +313,21 @@ class StreamSession:
         if self._turns is not None:
             self._turns.set_agent_speaking(speaking)
 
-    def push_transcript(self, text: str) -> None:
+    def push_transcript(self, text: str, complete: bool | None = None) -> None:
         """The caller's latest (interim or final) speech-to-text for the current turn.
 
         If it ends on a word no sentence can end on ("...a lot of", "...because", "um"),
         the turn waits ``TurnConfig.incomplete_silence_ms`` before ``end_of_turn``. Send it
         as soon as your STT has it; text for a turn that already ended is ignored.
+
+        ``complete``: optionally, a semantic verdict on whether the sentence is finished
+        (a text end-of-utterance model, or your LLM). It replaces Smart Turn's audio
+        verdict for this pause; use it where Smart Turn is weak (Arabic, see E5B_SPEC.md).
+        Do not pass a silence-based STT "final": it fires at mid-sentence pauses too.
         """
         if self._turns is not None:
             with self._lock:
-                self._turns.set_transcript(text)
+                self._turns.set_transcript(text, complete)
 
     def flush(self) -> SessionOutput:
         """End of stream: return all buffered audio and remaining events."""
