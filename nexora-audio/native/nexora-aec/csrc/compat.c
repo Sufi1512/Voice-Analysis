@@ -13,3 +13,13 @@ int __isoc23_sscanf(const char *s, const char *fmt, ...) {
     va_end(ap);
     return r;
 }
+
+/* Same story for the C23 strto* redirects (seen on aarch64 builds). */
+#include <stdlib.h>
+
+long __isoc23_strtol(const char *s, char **end, int base) { return strtol(s, end, base); }
+unsigned long __isoc23_strtoul(const char *s, char **end, int base) { return strtoul(s, end, base); }
+long long __isoc23_strtoll(const char *s, char **end, int base) { return strtoll(s, end, base); }
+unsigned long long __isoc23_strtoull(const char *s, char **end, int base) {
+    return strtoull(s, end, base);
+}

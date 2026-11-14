@@ -60,6 +60,7 @@ for f in "$DEST"/*."$EXT"; do strip_lib "$f"; set_id "$f"; done
     echo "$(basename "$f") sha256 $(sha "$f")"
     if [ "$OS" = linux ]; then
       echo "  newest glibc: $(objdump -T "$f" | grep -o 'GLIBC_[0-9.]*' | sort -V | tail -1)"
+      echo "  needs glibc > 2.34 for: $(objdump -T "$f" | awk '/GLIBC_2\.(3[5-9]|[4-9][0-9])/{print $NF}' | tr '\n' ' ')"
       echo "  needs: $(objdump -p "$f" | awk '/NEEDED/{print $2}' | tr '\n' ' ')"
     else
       echo "  minos: $(otool -l "$f" | awk '/minos/{print $2; exit}')"
