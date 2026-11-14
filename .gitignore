@@ -16,3 +16,8 @@ __pycache__/
 nexora-audio/qualitylab/.cache/
 nexora-audio/qualitylab/out/
 .venv/
+
+# planning-with-files working files
+task_plan.md
+findings.md
+progress.md
