@@ -18,6 +18,11 @@ LATENCY_MS = {"deepfilternet3": 30.0, "rnnoise": 20.0}
 
 @pytest.fixture(params=sorted(LATENCY_MS))
 def audio(request: pytest.FixtureRequest) -> NexoraAudio:
+    if request.param == "deepfilternet3":
+        from nexora_audio.backends import deepfilternet as dfn
+
+        if dfn.probe() is not None:
+            pytest.skip("DeepFilterNet not available on this platform")
     a = NexoraAudio(sample_rate=48000, noise_backend=request.param, **NC_ONLY)
     a.initialize()
     yield a
