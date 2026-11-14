@@ -26,6 +26,7 @@ export REDIS_URL="${REDIS_URL:-redis://localhost:6379/0}"
 export MINIO_PUBLIC_ENDPOINT="${MINIO_PUBLIC_ENDPOINT:-http://localhost:9000}"
 export ENVIRONMENT=test
 export PYTHONPATH="$dograh"
+export NEXORA_ENV_FILE="$here/.env.nexora"
 
 cd "$dograh/api"
 "$venv/bin/python" -m pytest -q -p no:cacheprovider \
