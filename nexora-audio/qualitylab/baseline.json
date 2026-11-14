@@ -38,6 +38,10 @@
   "speech_cut": 5.16,
   "stoi_no_harm": -0.0666,
   "text_hold": 0.0,
+  "tts_cutoff_ar": 5.0,
+  "tts_cutoff_en": 18.181818181818183,
+  "tts_reply_gap_ar": 1902.0,
+  "tts_reply_gap_en": 696.3,
   "turn_cutoff": 14.285714285714286,
   "wer_clean": 0.4098360655737705,
   "wer_noisy": 10.58931860036834

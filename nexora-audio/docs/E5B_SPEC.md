@@ -96,3 +96,47 @@ as good as the customer's STT.
 in the gap after "can". It is now at 8.37 s, the gap between the words (energy dips to
 -48 dB there). It is still the one unfinished case being cut, so the E5 numbers do not
 change.
+
+## Synthetic English and Arabic calls (E5c, 2026-11-14)
+
+No real recordings are available, so the lab now generates scripted caller turns with
+offline text-to-speech (`qualitylab/tts_scripts.py`, `tts_gen.py`; voices and licences in
+`qualitylab/SOURCES.md`). Because the script is known, every pause point and the transcript
+are exact, with no hand-labelling.
+
+- 12 unfinished-sentence turns per language: half end on a word in the text-cue list
+  ("...a flight to", "...ممكن تساعدني في"), half do not ("...my account number is",
+  "...رقم الحساب هو", "...started when"). 4 two-sentence turns per language.
+- Two ways to make the pause: **comma** (synthesised with a comma, so the voice keeps a
+  "going on" tone) and **split** (the first part synthesised alone, so it ends on a falling,
+  finished-sounding tone: a caller trailing off). Comma cut points are kept only when they
+  fall where the first part ends when spoken alone (within 10% + 60 ms); 6 failed that and
+  were dropped, leaving 50 cases. Pause points were also checked with Whisper.
+- Pauses 0.6-1.5 s; alternating a wideband line with 25 dB pink noise and an 8 kHz u-law
+  phone line with 20 dB pink noise. Perfect transcripts pushed 300 ms into the pause.
+
+| Setting | EN unfinished cut | AR unfinished cut | Between-sentence cut (EN / AR) | Reply gap median, EN / AR |
+| --- | --- | --- | --- | --- |
+| Silence rule only | 77% | 80% | 75% / 75% | 690 / 677 ms |
+| Silence rule + text cue | 45% | 25% | 75% / 75% | 690 / 677 ms |
+| Smart Turn only | 36% | 25% | 75% / 75% | 696 / 1902 ms |
+| **Smart Turn + text cue (default)** | **18%** | **5%** | 75% / 75% | 696 / **1902** ms |
+| Default, long wait 1.5 s | 32% | 30% | 75% / 75% | 696 / 1046 ms |
+| Default, long wait 1.2 s | 41% | 50% | 75% / 75% | 696 / 734 ms |
+
+What this shows:
+
+- **The text cue earns its place here**: with Smart Turn it halves English cut-offs
+  (36% → 18%) and Arabic ones (25% → 5%), at no cost to reply speed. On this set it is
+  not redundant, unlike on the read-speech set.
+- **English cut-offs left** are at words not on the list ("...is", "...with", "...when",
+  where a sentence can also end) said with a finished-sounding tone.
+- **Arabic replies are slow**: Smart Turn calls most *finished* Arabic sentences from this
+  voice unfinished (probabilities 0.01-0.4), so the caller waits 2 s. Whether that is this
+  synthetic voice (undiacritised text, a Jordanian voice fine-tuned from an English one) or
+  Smart Turn itself, only real Arabic speech can say. Shortening the long wait trades it
+  straight back into cut-offs (table). Logged in `OPEN_ISSUES.md`; defaults unchanged.
+
+Gates: `tts_cutoff_en`, `tts_cutoff_ar` (target 3%), `tts_reply_gap_en`, `tts_reply_gap_ar`
+(target 800 ms), report-only. They only run where the synthetic set has been generated
+(not in CI).

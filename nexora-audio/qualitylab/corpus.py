@@ -13,6 +13,7 @@ Sets (see VOICE_QUALITY_PLAN.md, "How we prove it"):
 
 from __future__ import annotations
 
+import json
 import zlib
 from collections.abc import Iterator
 from dataclasses import dataclass, field
@@ -314,6 +315,73 @@ def mid_turn_cases(clips: dict[str, np.ndarray]) -> Iterator[Case]:
 # -- profiles -----------------------------------------------------------------------
 
 
+def tts_turn_cases() -> Iterator[Case]:
+    """The synthetic turn set (``turns_tts``), if ``qualitylab/tts_gen.py`` has been run.
+
+    English and Arabic scripted caller turns (``tts_scripts.py``) with one pause each,
+    0.6-1.5 s, alternating a wideband line with 25 dB pink noise and an 8 kHz u-law phone
+    line with 20 dB pink noise. The known text stands in for a perfect STT."""
+    root = sources.cache_dir() / "tts" / "turns"
+    index = root / "labels.json"
+    if not index.exists():
+        return
+    from scipy.io import wavfile
+
+    lengths = [600, 900, 1200, 1500]
+    for k, c in enumerate(json.loads(index.read_text())["cases"]):
+        _, raw = wavfile.read(root / f"{c['id']}.wav")
+        x = _level(raw.astype(np.float32) / 32768)
+        ms = lengths[k % 4]
+        cut = int(c["cut"])
+        body = np.concatenate([x[:cut], np.zeros(int(ms / 1000 * RATE), np.float32), x[cut:]])
+        pause = (LEAD_S + cut / RATE, LEAD_S + cut / RATE + ms / 1000)
+        end = LEAD_S + len(body) / RATE
+        s = _pad(body, tail=3.0)
+        phone = k % 2 == 1
+        nz = synth.scale_to_snr(
+            s, _noise("pink", len(s), seed_of(c["id"], "tts")), 20 if phone else 25
+        )
+        labels = {
+            "pauses": [pause],
+            "true_end": end,
+            "texts": [(pause[0], c["text_at_pause"]), (end, c["text"])],
+        }
+        meta = {
+            "clip": c["id"],
+            "lang": c["lang"],
+            "kind": c["kind"],
+            "variant": c["variant"],
+            "line": "phone" if phone else "wideband",
+            "pauses_ms": [ms],
+        }
+        if phone:
+            mic8, _ = synth.phone_line(s + nz, "mulaw")
+            yield Case(
+                f"turns_tts/{c['id']}/phone",
+                "turns_tts",
+                8000,
+                mic8,
+                synth.band8k(s),
+                synth.band8k(nz),
+                encoding="mulaw",
+                speech_span=(LEAD_S, end),
+                labels=labels,
+                meta=meta,
+            )
+        else:
+            yield Case(
+                f"turns_tts/{c['id']}/wideband",
+                "turns_tts",
+                RATE,
+                (s + nz).astype(np.float32),
+                s,
+                nz,
+                speech_span=(LEAD_S, end),
+                labels=labels,
+                meta=meta,
+            )
+
+
 def _clips() -> tuple[list[str], dict[str, np.ndarray]]:
     clips = sources.speech_clips()
     if len(clips) < 2:
@@ -391,3 +459,4 @@ def build(profile: str) -> Iterator[Case]:
         c = clip(i + 13)
         yield turn_case(c, clips[c], plans[i % len(plans)])
     yield from mid_turn_cases(clips)
+    yield from tts_turn_cases()

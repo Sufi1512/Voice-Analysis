@@ -29,6 +29,7 @@ than `qualitylab/baseline.json` by more than its tolerance. CI: `.github/workflo
 | reverb | 6 | Synthetic rooms, RT60 0.3 and 0.6 s, plus noise |
 | loss | 16 | 1, 3, 5, 10% packet loss (bursty), each paired with a loss-free twin |
 | echo | 12 | Agent speech leaking back through a simulated speakerphone (delay 40/120/250 ms, echo at 0 and −10 dB), agent-only and double-talk |
+| turns_tts | 50 | Synthetic English and Arabic caller turns (offline TTS, scripted), one pause each, wideband and 8 kHz phone line; only where generated (`SOURCES.md`) |
 | turns | 26 | Speech with inserted pauses of 400–1500 ms, to measure cut-offs and reply delay: 7 inside an unfinished sentence, 11 after a clause the sentence goes on from, 8 cases (16 pauses) between two full sentences (see `E5_SPEC.md`) |
 
 Sources and licences: `qualitylab/SOURCES.md`. Speech-to-text accuracy uses Whisper tiny.en
@@ -182,6 +183,15 @@ sentence. Turn cases now get simulated STT text (Whisper tiny.en) 300 ms into ea
 when the lab runs with STT. All gates unchanged from E5; the new `text_hold` gate (finished
 turns held up by the text) is 0%. One E5 test point (`clnsp18`) was moved from inside a
 word to the word gap. Report: `docs/quality/report-full-2026-11-14-e5b.md`.
+
+## Update after E5c (2026-11-14)
+
+Synthetic English and Arabic calls (`turns_tts`, 50 cases; `E5B_SPEC.md`). Mid-sentence pauses
+taken as end of turn: English 18%, Arabic 5% (silence rule alone: 77% / 80%). Arabic replies
+take 1.9 s (median) because Smart Turn hears most finished sentences from this voice as
+unfinished (`OPEN_ISSUES.md` I-013). All other gates unchanged. `chunk_time` in this run (52.9
+ms) was taken while other test suites shared the CPUs; the baseline keeps 8.8 ms. Report:
+`docs/quality/report-full-2026-11-14-e5c.md`.
 
 ## Known limits of this baseline
 

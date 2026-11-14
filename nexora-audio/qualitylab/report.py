@@ -130,6 +130,10 @@ def render(rows: list[dict[str, Any]], gates: list[GateResult], meta: dict[str, 
             ],
         ),
         ("turns", ["pauses_ms", "pauses", "pauses_cut", "reply_gap_ms"]),
+        (
+            "turns_tts",
+            ["lang", "kind", "variant", "line", "pauses_ms", "pauses_cut", "reply_gap_ms"],
+        ),
         ("loss", ["loss_pct", "lost_fraction", "stoi_out", "loss_stoi_drop"]),
     ):
         rs = by_set.get(name, [])

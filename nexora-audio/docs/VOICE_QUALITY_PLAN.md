@@ -9,7 +9,8 @@ packet-loss concealment, Opus input, per-call quality numbers. E4 (echo) done on
 on 2026-11-14 (`E5_SPEC.md`): Smart Turn end-of-turn; cut-offs inside unfinished sentences
 71% → 14% in the lab, target 3% not met yet. E5b (`E5B_SPEC.md`): the caller's transcript
 as a second cue; free in the lab but no extra gain over Smart Turn on English read speech.
-Needs real calls (and Arabic) to go further.
+Needs real calls (and Arabic) to go further. E5c: synthetic EN/AR calls; with the text cue
+mid-sentence cut-offs EN 18%, AR 5%; Arabic replies slow (1.9 s), open issue I-013.
 
 2026-11-13. Covers noise, echo, cutting, turn-taking and network problems in nexora-audio, Voice Cloud and the Dograh integration.
 

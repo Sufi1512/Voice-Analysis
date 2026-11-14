@@ -190,6 +190,56 @@ tolerance = 10.0
 phase = "E5"
 
 [[gate]]
+id = "tts_cutoff_en"
+title = "Synthetic English calls: mid-sentence pauses taken as end of turn (%)"
+metric = "pauses_cut"
+sets = ["turns_tts"]
+kind = "mid"
+lang = "en"
+agg = "pause_pct"
+op = "<="
+threshold = 3.0
+tolerance = 10.0
+phase = "E5"
+
+[[gate]]
+id = "tts_reply_gap_en"
+title = "Synthetic English calls: reply gap after a finished turn, median (ms)"
+metric = "reply_gap_ms"
+sets = ["turns_tts"]
+lang = "en"
+agg = "median"
+op = "<="
+threshold = 800.0
+tolerance = 150.0
+phase = "E5"
+
+[[gate]]
+id = "tts_cutoff_ar"
+title = "Synthetic Arabic calls: mid-sentence pauses taken as end of turn (%)"
+metric = "pauses_cut"
+sets = ["turns_tts"]
+kind = "mid"
+lang = "ar"
+agg = "pause_pct"
+op = "<="
+threshold = 3.0
+tolerance = 10.0
+phase = "E5"
+
+[[gate]]
+id = "tts_reply_gap_ar"
+title = "Synthetic Arabic calls: reply gap after a finished turn, median (ms)"
+metric = "reply_gap_ms"
+sets = ["turns_tts"]
+lang = "ar"
+agg = "median"
+op = "<="
+threshold = 800.0
+tolerance = 150.0
+phase = "E5"
+
+[[gate]]
 id = "reply_gap"
 enforce = true
 title = "Reply gap: end of speech to end-of-turn event, median (ms)"

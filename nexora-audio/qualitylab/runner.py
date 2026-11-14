@@ -25,6 +25,8 @@ def turn_transcripts(case: Case) -> list[tuple[float, str]]:
     on the last 4 s of clean speech stands in for the customer's STT."""
     from qualitylab import stt
 
+    if "texts" in case.labels:  # scripted (synthetic) speech: the text is known
+        return [(t + STT_DELAY_S, text) for t, text in case.labels["texts"]]
     rate = case.rate
     points = [a for a, _ in case.labels["pauses"]] + [case.labels["true_end"]]
     out = []
@@ -106,7 +108,7 @@ def _transcribe_memo(x: np.ndarray, rate: int) -> str:
 
 
 def measure(case: Case, settings: dict[str, Any], use_stt: bool) -> dict[str, Any]:
-    stt_text = use_stt and case.set == "turns"
+    stt_text = case.set == "turns_tts" or (use_stt and case.set == "turns")
     r = process(case, settings, stt_text)
     rate = case.rate
     n = len(case.mic)
@@ -185,7 +187,7 @@ def measure(case: Case, settings: dict[str, Any], use_stt: bool) -> dict[str, An
             if sp.stop - sp.start > rate:
                 row["double_talk_stoi"] = round(m.stoi(case.clean[sp], out[sp], rate), 4)
 
-    if case.set == "turns":
+    if case.set in ("turns", "turns_tts"):
         eot = [
             e["time_ms"] / 1000 - lat_s
             for e in ev
