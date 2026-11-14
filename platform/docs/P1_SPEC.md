@@ -1,6 +1,6 @@
 # P1 NEXORA Core: specification
 
-Status: **draft, waiting for approval** (no implementation before approval)   ·   Date: 2026-11-14   ·   Grilling done 2026-11-14 (decisions below)
+Status: **Approved** by the user on 2026-11-14   ·   Grilling done 2026-11-14 (decisions below)
 
 Builds on: `NEXORA_SYSTEM_ARCHITECTURE.md` §3, §7; `NEXORA_DATABASE_ARCHITECTURE.md` §3.1–3.4,
 §3.9; `NEXORA_IMPLEMENTATION_ROADMAP.md` P0 (repo foundations) and P1. P0 (pinned Dograh with
