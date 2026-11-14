@@ -40,8 +40,22 @@ else cp "$WORK/rnnoise-0.2/.libs/librnnoise.so.0."* "$DEST/librnnoise.so"; fi
 
 echo "== DeepFilterNet libdf @ $DFN_COMMIT"
 git clone -q "$DFN_REPO" "$WORK/dfn" && git -C "$WORK/dfn" checkout -q "$DFN_COMMIT"
+# macOS: tract-linalg 0.21.4 always uses Apple's undocumented AMX instructions there, which
+# virtual machines (CI runners) lack: "illegal instruction" (OPEN_ISSUES I-031). Patch it
+# to opt in with TRACT_APPLE_AMX=1; NEON kernels otherwise. Linux builds are unchanged.
+if [ "$OS" = darwin ] || [ "${NEXORA_PATCH_TRACT:-0}" = 1 ]; then
+  ( cd "$WORK/dfn" && cargo fetch -q )
+  want=$(awk '/^name = "tract-linalg"/{getline; gsub(/[^0-9.]/,""); print}' "$WORK/dfn/Cargo.lock")
+  [ "$want" = 0.21.4 ] || { echo "tract-linalg $want: the AMX patch is for 0.21.4"; exit 1; }
+  src=$(ls -d "${CARGO_HOME:-$HOME/.cargo}"/registry/src/*/tract-linalg-0.21.4 | head -1)
+  cp -R "$src" "$WORK/tract-linalg"
+  patch -s -p1 -d "$WORK/tract-linalg" < "$HERE/tract-linalg-0.21.4-amx-opt-in.patch"
+  printf '\n[patch.crates-io]\ntract-linalg = { path = "%s" }\n' "$WORK/tract-linalg" >> "$WORK/dfn/Cargo.toml"
+fi
 # not --locked: the Cargo.lock at this commit is out of date with its Cargo.toml files
-( cd "$WORK/dfn" && RUSTFLAGS="--remap-path-prefix=$WORK=/build" \
+# paths remapped so the binary does not depend on where it was built (reproducible)
+CARGO_DIR=${CARGO_HOME:-$HOME/.cargo}
+( cd "$WORK/dfn" && RUSTFLAGS="--remap-path-prefix=$WORK=/build --remap-path-prefix=$CARGO_DIR=/cargo" \
     cargo build -q --release -p deep_filter --lib --no-default-features --features capi )
 cp "$WORK/dfn/target/release/libdf.$EXT" "$DEST/libdf.$EXT"
 

@@ -42,12 +42,9 @@ jobs:
         run: |
           mkdir -p src/nexora_audio/_native/${{ matrix.tag }}
           cp "$RUNNER_TEMP/native/${{ matrix.tag }}"/lib* src/nexora_audio/_native/${{ matrix.tag }}/
-          if [ "${{ matrix.tag }}" = darwin-aarch64 ]; then
-            # libdf hits an illegal instruction on Apple Silicon runners (OPEN_ISSUES I-031):
-            # test the RNNoise fallback that ships there instead
-            rm src/nexora_audio/_native/darwin-aarch64/libdf.dylib
-          fi
           if [ "$RUNNER_OS" = Linux ]; then sudo apt-get install -y --no-install-recommends libopus0; fi
           pip install -e ".[dev]"
           python -c "import nexora_audio as n; s=n.StreamSession(echo_cancellation=True); print(s.backends)"
+          # DeepFilterNet must load and run here (I-031: it used to die on Apple Silicon)
+          python -c "import nexora_audio as n; s=n.StreamSession(); assert 'deepfilternet3' in s.backends, s.backends; s.process(bytes(640)); print('libdf ok')"
           pytest -q
