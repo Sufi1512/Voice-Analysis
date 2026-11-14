@@ -62,6 +62,35 @@ def test_every_api_path_the_dashboard_calls_exists(client: Any) -> None:
     assert used and used <= spec, used - spec
 
 
+def test_every_dashboard_string_has_an_arabic_translation(client: Any) -> None:
+    """I-025: everything the dashboard shows goes through t() and exists in Arabic."""
+    import re
+
+    js = client.get("/dashboard/static/app.js").text
+    html = client.get("/dashboard/").text
+    i18n = client.get("/dashboard/static/i18n.js")
+    assert i18n.status_code == 200 and "javascript" in i18n.headers["content-type"]
+    unq = lambda x: x.replace('\\"', '"')  # noqa: E731
+    keys = {unq(k) for k in re.findall(r'^\s*"((?:[^"\\]|\\.)*)":\s', i18n.text, re.M)}
+    used = {unq(x) for x in re.findall(r'\bt\("((?:[^"\\]|\\.)*)"', js)}
+    used |= set(re.findall(r'data-i18n(?:-label)?="([^"]+)"', html))
+    # passed to t() as values: field labels, page titles, statuses and roles from the API
+    field = r'^\s*\["\w+", (?:"\w+"|\[[^\]]*\]), "((?:[^"\\]|\\.)*)"\],$'
+    used |= {unq(x) for x in re.findall(field, js, re.M)}
+    titles = re.search(r"const TITLES = \{(.*)\};", js)
+    assert titles is not None
+    used |= set(re.findall(r'\w+: "([^"]+)"', titles.group(1)))
+    used |= {"ended", "failed", "active", "revoked", "default", "sent", "pending", "empty",
+             "suspended", "process", "relay", "admin", "viewer"}  # fmt: skip
+    assert len(used) > 120
+    assert used <= keys, sorted(used - keys)
+    assert re.search(r"\bt\(`", js) is None  # template strings cannot be looked up
+    # visible text is never a bare English literal outside t()
+    tags = "h1|h2|p|button|th|label|legend|option"
+    bare = re.findall(rf'h\("(?:{tags})", \{{[^}}]*\}}, "([A-Z][^"]+)"', js)
+    assert bare == [], bare
+
+
 # -- real browser ------------------------------------------------------------------------
 
 CHROME = next(
@@ -69,6 +98,10 @@ CHROME = next(
 )
 SHOTS = Path(os.environ.get("NEXORA_DASHBOARD_SHOTS", tempfile.gettempdir())) / "nexora-dashboard"
 IGNORED = ("Failed to load resource",)  # expected 401/404 probes (signed out, SSO off)
+_axe = os.environ.get("NEXORA_AXE_JS")
+AXE = Path(_axe) if _axe and Path(_axe).is_file() else None
+if os.environ.get("CI") and CHROME and AXE is None:
+    raise RuntimeError("CI runs the dashboard accessibility audit: set NEXORA_AXE_JS")
 
 
 def _free_port() -> int:
@@ -161,6 +194,21 @@ class Browser:
         cond = " && ".join(f"r.textContent.includes({json.dumps(t)})" for t in texts)
         return f"[...document.querySelectorAll('#view tbody tr')].some(r => {cond})"
 
+    def audit(self, where: str) -> None:
+        """Run axe-core (WCAG 2.0/2.1 A and AA rules) on the page; fail on any violation.
+        Needs NEXORA_AXE_JS (axe.min.js, e.g. from ``npm install axe-core``); skipped
+        without it locally, required in CI."""
+        if AXE is None:
+            return
+        if not self.js("typeof axe !== 'undefined'"):
+            self.js(AXE.read_text())  # through the DevTools protocol, not the page's CSP
+        found = self.js(
+            "axe.run(document, {runOnly: ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']})"
+            ".then(r => r.violations.map(v => v.id + ': ' + v.help + ' -> '"
+            " + v.nodes.slice(0, 3).map(n => n.target.join(' ')).join(' | ')))"
+        )
+        assert found == [], f"{where}: {found}"
+
     def shot(self, name: str) -> Path:
         import base64
 
@@ -220,6 +268,7 @@ def live(tmp_path: Path) -> Any:
     t.join(10)
 
 
+PAGE_READY = "!!document.querySelector('#view h1') && !document.querySelector('#view').ariaBusy"
 SET_ECHO = (
     "const c = [...document.querySelectorAll('dialog[open] label.check')]"
     ".find(l => l.textContent.startsWith('Echo cancellation')).querySelector('input');"
@@ -293,7 +342,7 @@ def test_dashboard_in_a_real_browser(live: Any) -> None:
                 assert "18.5" in b.js("document.body.innerText")  # per-call quality column
         b.js("location.hash = '#/team'")
         b.wait("document.querySelector('#view h1')?.textContent === 'Team'")
-        b.js("document.querySelector('#view input[type=text]').value = 'Ops@Acme.example'")
+        b.js("document.querySelector('#view input[type=email]').value = 'Ops@Acme.example'")
         b.click("Add", "#view")
         b.wait(b.row_has("ops@acme.example", "admin"))
         b.js("location.hash = '#/billing'")
@@ -310,6 +359,58 @@ def test_dashboard_in_a_real_browser(live: Any) -> None:
             time.sleep(0.1)
         (csv_file,) = list(downloads.glob("audit-*.csv"))
         assert "sso.member.add" in csv_file.read_text() and "key.revoke" in csv_file.read_text()
+
+        # I-025: accessibility audit (axe-core, WCAG 2 A/AA) of every page, keyboard focus,
+        # small screens and Arabic right-to-left
+        views = ("overview", "keys", "profiles", "sessions", "team", "billing", "audit")
+        if AXE is not None:  # the audit itself works: an image without alt text fails it
+            b.js("document.querySelector('#view').append(Object.assign(new Image(), {src: 'x'}))")
+            with pytest.raises(AssertionError, match="image-alt"):
+                b.audit("self-check")
+        for view in views:
+            b.js(f"location.hash = '#/{view}'")
+            b.wait(PAGE_READY)
+            assert b.js("document.activeElement === document.querySelector('#view h1')"), view
+            b.audit(view)
+        assert b.js("document.querySelector('nav a[aria-current=page]').hash") == "#/audit"
+        assert b.js("document.querySelector('.skip').getAttribute('href')") == "#main"
+
+        b.js("document.querySelector('#lang').value = 'ar'")
+        b.js("document.querySelector('#lang').dispatchEvent(new Event('change'))")
+        b.wait("document.documentElement.dir === 'rtl' && document.documentElement.lang === 'ar'")
+        b.wait("document.querySelector('#view h1')?.textContent === 'سجل التدقيق'")
+        assert b.js("document.querySelector('nav a').textContent") == "نظرة عامة"
+        assert b.js("document.querySelector('#view th').textContent") == "الوقت"
+        assert b.js("localStorage.getItem('nexora.dashboard.lang')") == "ar"  # the user chose it
+        for view in views:
+            b.js(f"location.hash = '#/{view}'")
+            b.wait(PAGE_READY)
+            b.audit(f"{view} (ar)")
+        b.js("location.hash = '#/overview'")
+        b.wait("!!document.querySelector('svg.chart')")
+        assert "دقيقة هذا الشهر" in b.js("document.body.innerText")
+        b.shot("overview-ar")
+        # the chart keeps time running left to right; keys and IDs stay left to right
+        assert b.js("getComputedStyle(document.querySelector('svg.chart')).direction") == "ltr"
+
+        b.call(
+            "Emulation.setDeviceMetricsOverride",
+            width=390,
+            height=844,
+            deviceScaleFactor=1,
+            mobile=True,
+        )
+        for view in ("overview", "keys", "sessions"):
+            b.js(f"location.hash = '#/{view}'")
+            b.wait(PAGE_READY)
+            # nothing wider than the phone: wide tables scroll inside their own box
+            assert b.js("document.documentElement.scrollWidth <= window.innerWidth + 1"), view
+            b.shot(f"phone-{view}-ar")
+        b.js("document.querySelector('#lang').value = 'en'")
+        b.js("document.querySelector('#lang').dispatchEvent(new Event('change'))")
+        b.wait("document.documentElement.dir === 'ltr'")
+        b.shot("phone-sessions-en")
+        b.call("Emulation.clearDeviceMetricsOverride")
 
         b.js("document.querySelector('#signout').click()")
         b.wait("!document.querySelector('#signin').hidden")

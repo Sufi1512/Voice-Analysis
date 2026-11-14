@@ -23,7 +23,7 @@ SECURITY_HEADERS = {
     "X-Frame-Options": "DENY",
     "Cache-Control": "no-store",
 }
-FILES = {"app.js": "text/javascript", "app.css": "text/css"}
+FILES = {"app.js": "text/javascript", "i18n.js": "text/javascript", "app.css": "text/css"}
 
 router = APIRouter(include_in_schema=False)
 

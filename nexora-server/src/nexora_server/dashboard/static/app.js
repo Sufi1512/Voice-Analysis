@@ -1,5 +1,8 @@
 // Nexora Voice Cloud admin dashboard (E8). No framework, no third-party code.
 // Every value from the API is put on the page with textContent, never as HTML.
+// English and Arabic (right to left): every visible string goes through t() (i18n.js).
+
+import { LANGS, lang, locale, setLang, t } from "./i18n.js";
 
 const KEY_STORE = "nexora.dashboard.key"; // sessionStorage: gone when the tab closes
 const state = { me: null, org: null, orgs: [] };
@@ -22,8 +25,36 @@ export function h(tag, attrs = {}, ...kids) {
 }
 
 const $ = (sel) => document.querySelector(sel);
-const fmtDate = (s) => (s ? new Date(s).toLocaleString() : "");
-const fmtMin = (m) => (m >= 100 ? Math.round(m).toLocaleString() : m.toFixed(1));
+const fmtDate = (s) => (s ? new Date(s).toLocaleString(locale()) : "");
+const fmtMin = (m) => (m >= 100 ? Math.round(m).toLocaleString(locale()) : m.toFixed(1));
+
+// a translated sentence with elements in it: tpl("Use the {scope} scope", {scope: node})
+function tpl(text, nodes) {
+  return text.split(/(\{\w+\})/).map((part) => {
+    const m = /^\{(\w+)\}$/.exec(part);
+    return m && nodes[m[1]] ? nodes[m[1]] : part;
+  });
+}
+
+// a data table with a caption and column headers for screen readers, scrollable on its
+// own (by keyboard too) when it is wider than the screen
+function table(caption, headers, rows) {
+  return h(
+    "div",
+    { class: "table-wrap", role: "region", "aria-label": caption, tabindex: 0 },
+    h(
+      "table",
+      {},
+      h("caption", { class: "sr-only" }, caption),
+      h("thead", {}, h("tr", {}, headers.map((x) => h("th", { scope: "col" }, x)))),
+      h("tbody", {}, rows),
+    ),
+  );
+}
+
+function pill(status, good) {
+  return h("span", { class: `pill ${good === undefined ? "" : good ? "good" : "bad"}` }, t(status));
+}
 
 // ---- API -------------------------------------------------------------------------------
 
@@ -73,7 +104,27 @@ function showSignin(message = "") {
   $("#signin-error").textContent = message;
 }
 
+// text in index.html: data-i18n (text) and data-i18n-label (aria-label)
+function translatePage() {
+  for (const el of document.querySelectorAll("[data-i18n]")) el.textContent = t(el.dataset.i18n);
+  for (const el of document.querySelectorAll("[data-i18n-label]")) el.setAttribute("aria-label", t(el.dataset.i18nLabel));
+  $("#signin-help").replaceChildren(...tpl(t("Paste an API key with the {scope} scope. It is kept only in this browser tab."), { scope: h("code", {}, "admin") }));
+  const pick = $("#lang");
+  pick.replaceChildren(...LANGS.map(([code, name]) => h("option", { value: code, selected: code === lang, lang: code }, name)));
+}
+
 async function start() {
+  setLang(lang, false);
+  translatePage();
+  $("#lang").addEventListener("change", (e) => {
+    setLang(e.target.value);
+    translatePage();
+    if (state.me) {
+      $("#who").textContent = state.me.superadmin ? t("super-admin") : state.me.org_name || state.me.org_id;
+      if (state.me.superadmin) fillOrgPick();
+      render();
+    }
+  });
   $("#signin-form").addEventListener("submit", async (e) => {
     e.preventDefault();
     sessionStorage.setItem(KEY_STORE, $("#signin-key").value.trim());
@@ -103,13 +154,13 @@ async function boot() {
   }
   if (!state.me.superadmin && !state.me.scopes.includes("admin")) {
     sessionStorage.removeItem(KEY_STORE);
-    showSignin("This key does not have the admin scope.");
+    showSignin(t("This key does not have the admin scope."));
     return;
   }
   $("#signin").hidden = true;
   $("#nav").hidden = false;
   $("#signout").hidden = false;
-  $("#who").textContent = state.me.superadmin ? "super-admin" : state.me.org_name || state.me.org_id;
+  $("#who").textContent = state.me.superadmin ? t("super-admin") : state.me.org_name || state.me.org_id;
   for (const el of document.querySelectorAll("[data-superadmin]")) el.hidden = !state.me.superadmin;
   if (state.me.superadmin) await loadOrgs();
   else state.org = state.me.org_id;
@@ -119,9 +170,13 @@ async function boot() {
 
 async function loadOrgs() {
   state.orgs = await api("GET", "/v1/orgs");
+  fillOrgPick();
+}
+
+function fillOrgPick() {
   const pick = $("#org-pick");
   pick.replaceChildren(
-    h("option", { value: "" }, "Choose an organization"),
+    h("option", { value: "" }, t("Choose an organization")),
     ...state.orgs.map((o) => h("option", { value: o.id, selected: o.id === state.org }, o.name)),
   );
   pick.onchange = () => {
@@ -131,22 +186,38 @@ async function loadOrgs() {
 }
 
 const VIEWS = { overview, keys, profiles, sessions, team, billing, audit, orgs };
+const TITLES = { overview: "Overview", keys: "API keys", profiles: "Profiles", sessions: "Sessions", team: "Team", billing: "Billing", audit: "Audit log", orgs: "Organizations" };
 
 async function render() {
   if (!state.me) return;
-  const name = (location.hash.replace(/^#\//, "") || "overview").split("/")[0];
-  for (const a of document.querySelectorAll("nav a")) a.classList.toggle("active", a.getAttribute("href") === `#/${name}`);
-  const view = VIEWS[name] || overview;
+  let name = (location.hash.replace(/^#\//, "") || "overview").split("/")[0];
+  if (!VIEWS[name]) name = "overview";
+  for (const a of document.querySelectorAll("nav a")) {
+    const here = a.getAttribute("href") === `#/${name}`;
+    a.classList.toggle("active", here);
+    if (here) a.setAttribute("aria-current", "page");
+    else a.removeAttribute("aria-current");
+  }
+  document.title = `${t(TITLES[name])} - ${t("Nexora Voice Cloud")}`;
+  const view = VIEWS[name];
   const root = $("#view");
   if (view !== orgs && state.me.superadmin && !state.org) {
-    root.replaceChildren(h("div", { class: "card" }, h("p", {}, "Choose an organization at the top right.")));
+    root.replaceChildren(h("div", { class: "card" }, h("p", {}, t("Choose an organization at the top right."))));
     return;
   }
-  root.replaceChildren(h("p", { class: "muted" }, "Loading..."));
+  root.setAttribute("aria-busy", "true");
+  root.replaceChildren(h("p", { class: "muted" }, t("Loading...")));
   try {
     root.replaceChildren(await view());
   } catch (err) {
-    root.replaceChildren(h("div", { class: "card" }, h("p", { class: "error" }, err.message)));
+    root.replaceChildren(h("div", { class: "card" }, h("p", { class: "error", role: "alert" }, err.message)));
+  }
+  root.removeAttribute("aria-busy");
+  // keyboard and screen-reader users land on the new page's heading, not back at the top
+  const heading = root.querySelector("h1");
+  if (heading && !document.querySelector("dialog[open]")) {
+    heading.tabIndex = -1;
+    heading.focus({ preventScroll: true });
   }
 }
 
@@ -154,7 +225,8 @@ function dialog(title, body, actions) {
   // a fresh <dialog> each time: a closing dialog's late "close" event can never reach the
   // next one (that once blanked a new API key before it could be copied)
   for (const old of document.querySelectorAll("dialog.closing")) old.remove();
-  const d = h("dialog", { class: "modal" }, h("form", { method: "dialog" }, h("h2", {}, title), body, h("div", { class: "row" }, h("span"), h("div", {}, ...actions))));
+  const id = `dlg-${Math.random().toString(36).slice(2)}`;
+  const d = h("dialog", { class: "modal", "aria-labelledby": id }, h("form", { method: "dialog" }, h("h2", { id }, title), body, h("div", { class: "row" }, h("span"), h("div", {}, ...actions))));
   d.addEventListener("close", () => {
     d.classList.add("closing");
     setTimeout(() => d.remove(), 0);
@@ -173,8 +245,13 @@ export function barChart(days) {
   svg.setAttribute("viewBox", "0 0 600 220");
   svg.setAttribute("preserveAspectRatio", "xMinYMid meet");
   svg.setAttribute("role", "img");
-  svg.setAttribute("aria-label", "Audio minutes per day");
   const max = Math.max(1, ...days.map((d) => d.audio_minutes));
+  const busiest = days.reduce((a, d) => (d.audio_minutes > (a?.audio_minutes ?? -1) ? d : a), null);
+  const total = days.reduce((a, d) => a + d.audio_minutes, 0);
+  svg.setAttribute(
+    "aria-label",
+    `${t("Audio minutes per day")}: ${t("{days} days, {total} minutes in total; busiest day {date} with {max} minutes.", { days: days.length, total: fmtMin(total), date: busiest?.date ?? "", max: fmtMin(busiest?.audio_minutes ?? 0) })}`,
+  );
   const w = 560 / Math.max(days.length, 1);
   const el = (tag, attrs, text) => {
     const e = document.createElementNS(NS, tag);
@@ -184,12 +261,12 @@ export function barChart(days) {
     return e;
   };
   el("line", { x1: 30, y1: 190, x2: 590, y2: 190 });
-  el("text", { x: 0, y: 14 }, `${fmtMin(max)} min`);
+  el("text", { x: 0, y: 14 }, t("{n} min", { n: fmtMin(max) }));
   days.forEach((d, i) => {
     const bh = (d.audio_minutes / max) * 170;
     const rect = el("rect", { x: 32 + i * w, y: 190 - bh, width: Math.max(w - 3, 1), height: bh, rx: 2 });
     const tip = document.createElementNS(NS, "title");
-    tip.textContent = `${d.date}: ${fmtMin(d.audio_minutes)} min, ${d.sessions} sessions`;
+    tip.textContent = t("{date}: {min} min, {n} sessions", { date: d.date, min: fmtMin(d.audio_minutes), n: d.sessions });
     rect.append(tip);
     if (i % 7 === 0 || i === days.length - 1) {
       el("text", { x: 32 + i * w, y: 208 }, String(d.date).slice(5));
@@ -206,18 +283,18 @@ async function overview() {
   return h(
     "div",
     {},
-    h("h1", {}, org.name),
+    h("h1", { dir: "auto" }, org.name),
     h(
       "div",
       { class: "tiles" },
-      tile(fmtMin(used), "minutes this month"),
-      tile(quota ? `${Math.round(pct)}%` : "none", quota ? `of ${quota.toLocaleString()} minute quota` : "monthly quota"),
-      tile(String(usage.sessions), "sessions, last 30 days"),
-      tile(`${usage.active_sessions} / ${org.max_concurrent_sessions}`, "calls right now / allowed at once"),
+      tile(fmtMin(used), t("minutes this month")),
+      tile(quota ? `${Math.round(pct)}%` : t("none"), quota ? t("of {quota} minute quota", { quota: quota.toLocaleString(locale()) }) : t("monthly quota")),
+      tile(String(usage.sessions), t("sessions, last 30 days")),
+      tile(`${usage.active_sessions} / ${org.max_concurrent_sessions}`, t("calls right now / allowed at once")),
     ),
-    quota ? h("div", { class: "card" }, meter(pct), h("p", { class: "muted" }, `${fmtMin(used)} of ${quota} minutes used`)) : null,
-    h("div", { class: "card" }, h("h2", {}, "Audio minutes per day (last 30 days, by the day each call ended)"), usage.days.length ? barChart(fillDays(usage.days, new Date(usage.period_start), new Date(usage.period_end))) : h("p", { class: "muted" }, "No sessions yet.")),
-    h("div", { class: "card" }, h("h2", {}, "Relay allowlist"), org.relay_allowlist.length ? h("ul", {}, org.relay_allowlist.map((x) => h("li", { class: "mono" }, x))) : h("p", { class: "muted" }, "Empty: Relay mode is off for this organization.")),
+    quota ? h("div", { class: "card" }, meter(pct, t("{used} of {quota} minutes used", { used: fmtMin(used), quota }))) : null,
+    h("div", { class: "card" }, h("h2", {}, t("Audio minutes per day (last 30 days, by the day each call ended)")), usage.days.length ? barChart(fillDays(usage.days, new Date(usage.period_start), new Date(usage.period_end))) : h("p", { class: "muted" }, t("No sessions yet."))),
+    h("div", { class: "card" }, h("h2", {}, t("Relay allowlist")), org.relay_allowlist.length ? h("ul", {}, org.relay_allowlist.map((x) => h("li", { class: "mono" }, x))) : h("p", { class: "muted" }, t("Empty: Relay mode is off for this organization."))),
   );
 }
 
@@ -234,10 +311,16 @@ export function fillDays(days, start, end) {
   return out;
 }
 
-function meter(pct) {
+function meter(pct, text) {
   const bar = h("span");
   bar.style.width = `${pct}%`; // CSSOM, allowed by the CSP (inline style attributes are not)
-  return h("div", { class: "meter", role: "meter", "aria-valuenow": Math.round(pct), "aria-valuemin": 0, "aria-valuemax": 100 }, bar);
+  const id = `meter-${Math.random().toString(36).slice(2)}`;
+  return h(
+    "div",
+    {},
+    h("div", { class: "meter", role: "meter", "aria-valuenow": Math.round(pct), "aria-valuemin": 0, "aria-valuemax": 100, "aria-labelledby": id }, bar),
+    h("p", { class: "muted", id }, text),
+  );
 }
 
 function tile(num, label) {
@@ -250,31 +333,31 @@ const SCOPES = ["stream", "admin", "usage:read"];
 
 async function keys() {
   const list = await api("GET", "/v1/keys");
-  const tbody = h("tbody", {}, list.map((k) => h(
+  const rows = list.map((k) => h(
     "tr",
     {},
-    h("td", {}, k.name || h("span", { class: "muted" }, "(no name)")),
+    h("td", { dir: k.name ? "auto" : null }, k.name || h("span", { class: "muted" }, t("(no name)"))),
     h("td", { class: "mono" }, `${k.prefix}...`),
-    h("td", {}, k.scopes.join(", ")),
+    h("td", { class: "mono" }, k.scopes.join(", ")),
     h("td", {}, fmtDate(k.created_at)),
-    h("td", {}, k.last_used_at ? fmtDate(k.last_used_at) : h("span", { class: "muted" }, "never")),
-    h("td", {}, k.revoked_at ? h("span", { class: "pill bad" }, "revoked") : h("button", { class: "danger", onclick: () => revokeKey(k) }, "Revoke")),
-  )));
+    h("td", {}, k.last_used_at ? fmtDate(k.last_used_at) : h("span", { class: "muted" }, t("never"))),
+    h("td", {}, k.revoked_at ? pill("revoked", false) : h("button", { class: "danger", "aria-label": t("Revoke key {name}", { name: k.name || k.prefix }), onclick: () => revokeKey(k) }, t("Revoke"))),
+  ));
   return h(
     "div",
     {},
-    h("div", { class: "row" }, h("h1", {}, "API keys"), h("button", { onclick: newKey }, "New key")),
-    h("div", { class: "card" }, h("table", {}, h("thead", {}, h("tr", {}, ["Name", "Key", "Scopes", "Created", "Last used", ""].map((t) => h("th", {}, t)))), tbody)),
+    h("div", { class: "row" }, h("h1", {}, t("API keys")), h("button", { onclick: newKey }, t("New key"))),
+    h("div", { class: "card" }, table(t("API keys"), [t("Name"), t("Key"), t("Scopes"), t("Created"), t("Last used"), t("Actions")], rows)),
   );
 }
 
 function newKey() {
-  const name = h("input", { type: "text", maxlength: 200, placeholder: "e.g. production agents" });
+  const name = h("input", { type: "text", maxlength: 200, placeholder: t("e.g. production agents") });
   const boxes = SCOPES.map((sc) => h("input", { type: "checkbox", value: sc, checked: sc === "stream" }));
   const err = h("p", { class: "error", role: "alert" });
-  const body = h("div", {}, h("label", {}, "Name ", name), ...SCOPES.map((sc, i) => h("label", { class: "check" }, boxes[i], sc)), err);
-  const d = dialog("New API key", body, [
-    h("button", { class: "secondary", value: "cancel" }, "Cancel"),
+  const body = h("div", {}, h("label", {}, `${t("Name")} `, name), h("fieldset", {}, h("legend", {}, t("Scopes")), ...SCOPES.map((sc, i) => h("label", { class: "check mono" }, boxes[i], sc))), err);
+  const d = dialog(t("New API key"), body, [
+    h("button", { class: "secondary", value: "cancel" }, t("Cancel")),
     h("button", {
       onclick: async (e) => {
         e.preventDefault();
@@ -287,23 +370,23 @@ function newKey() {
           err.textContent = ex.message;
         }
       },
-    }, "Create"),
+    }, t("Create")),
   ]);
 }
 
 function showSecret(secret) {
   const box = h("div", { class: "secret mono" }, secret);
-  const d = dialog("Copy your new key now", h("div", {}, h("p", {}, "It will not be shown again. Store it in your secrets manager."), box), [
-    h("button", { class: "secondary", onclick: (e) => { e.preventDefault(); navigator.clipboard?.writeText(secret); } }, "Copy"),
-    h("button", { value: "done" }, "Done"),
+  const d = dialog(t("Copy your new key now"), h("div", {}, h("p", {}, t("It will not be shown again. Store it in your secrets manager.")), box), [
+    h("button", { class: "secondary", onclick: (e) => { e.preventDefault(); navigator.clipboard?.writeText(secret); } }, t("Copy")),
+    h("button", { value: "done" }, t("Done")),
   ]);
   d.addEventListener("close", () => { box.textContent = ""; render(); }, { once: true });
 }
 
 function revokeKey(k) {
-  const d = dialog(`Revoke ${k.name || k.prefix}?`, h("p", {}, "Anything using this key stops working at once. This cannot be undone."), [
-    h("button", { class: "secondary", value: "cancel" }, "Cancel"),
-    h("button", { class: "danger", onclick: async (e) => { e.preventDefault(); await api("DELETE", `/v1/keys/${k.id}`); d.close(); render(); } }, "Revoke"),
+  const d = dialog(t("Revoke {name}?", { name: k.name || k.prefix }), h("p", {}, t("Anything using this key stops working at once. This cannot be undone.")), [
+    h("button", { class: "secondary", value: "cancel" }, t("Cancel")),
+    h("button", { class: "danger", onclick: async (e) => { e.preventDefault(); await api("DELETE", `/v1/keys/${k.id}`); d.close(); render(); } }, t("Revoke")),
   ]);
 }
 
@@ -335,14 +418,14 @@ function fieldInputs(fields, values) {
     if (type === "bool") {
       input = h("input", { type: "checkbox", checked: v === undefined ? null : Boolean(v), "data-unset": v === undefined ? "1" : null });
       input.indeterminate = v === undefined;
-      return [name, h("label", { class: "check" }, (inputs[name] = input), label, v === undefined ? h("span", { class: "muted" }, " (default)") : null)];
+      return [name, h("label", { class: "check" }, (inputs[name] = input), t(label), v === undefined ? h("span", { class: "muted" }, ` ${t("(default)")}`) : null)];
     }
     if (Array.isArray(type)) {
-      input = h("select", {}, h("option", { value: "" }, "(default)"), type.map((o) => h("option", { value: o, selected: v === o }, o)));
+      input = h("select", {}, h("option", { value: "" }, t("(default)")), type.map((o) => h("option", { value: o, selected: v === o }, o)));
     } else {
       input = h("input", { type: "number", step: "any", value: v ?? "" });
     }
-    return [name, h("label", {}, label, " ", (inputs[name] = input))];
+    return [name, h("label", {}, t(label), " ", (inputs[name] = input))];
   });
   return { inputs, els: els.map((x) => x[1]) };
 }
@@ -365,17 +448,17 @@ async function profiles() {
   return h(
     "div",
     {},
-    h("div", { class: "row" }, h("h1", {}, "Profiles"), h("button", { onclick: () => editProfile(null) }, "New profile")),
-    h("p", { class: "muted" }, "A profile is a named set of audio and turn-taking settings; clients pick one with ?profile=name."),
-    h("div", { class: "card" }, list.length ? h("table", {}, h("thead", {}, h("tr", {}, ["Name", "Audio", "Turns", "Updated", ""].map((t) => h("th", {}, t)))), h("tbody", {}, list.map((p) => h(
+    h("div", { class: "row" }, h("h1", {}, t("Profiles")), h("button", { onclick: () => editProfile(null) }, t("New profile"))),
+    h("p", { class: "muted" }, t("A profile is a named set of audio and turn-taking settings; clients pick one with ?profile=name.")),
+    h("div", { class: "card" }, list.length ? table(t("Profiles"), [t("Name"), t("Audio"), t("Turns"), t("Updated"), t("Actions")], list.map((p) => h(
       "tr",
       {},
-      h("td", {}, p.name, p.is_default ? h("span", { class: "pill good" }, " default") : null),
-      h("td", { class: "mono" }, JSON.stringify(p.audio_settings)),
-      h("td", { class: "mono" }, p.turn_settings === null ? "off" : JSON.stringify(p.turn_settings)),
+      h("td", {}, h("bdi", {}, p.name), p.is_default ? [" ", pill("default", true)] : null),
+      h("td", { class: "mono wrap" }, JSON.stringify(p.audio_settings)),
+      h("td", { class: "mono wrap" }, p.turn_settings === null ? t("off") : JSON.stringify(p.turn_settings)),
       h("td", {}, fmtDate(p.updated_at)),
-      h("td", {}, h("button", { class: "secondary", onclick: () => editProfile(p) }, "Edit"), " ", h("button", { class: "danger", onclick: () => deleteProfile(p) }, "Delete")),
-    )))) : h("p", { class: "muted" }, "No profiles yet: every session uses the built-in defaults.")),
+      h("td", {}, h("button", { class: "secondary", "aria-label": t("Edit {name}", { name: p.name }), onclick: () => editProfile(p) }, t("Edit")), " ", h("button", { class: "danger", "aria-label": t("Delete {name}", { name: p.name }), onclick: () => deleteProfile(p) }, t("Delete"))),
+    ))) : h("p", { class: "muted" }, t("No profiles yet: every session uses the built-in defaults."))),
   );
 }
 
@@ -393,13 +476,13 @@ function editProfile(p) {
   const body = h(
     "div",
     {},
-    h("label", {}, "Name ", name),
-    h("div", { class: "grid2" }, h("div", {}, h("h2", {}, "Audio"), audio.els, h("label", {}, "Other audio settings (JSON) ", advAudio)), h("div", {}, h("h2", {}, "Turn-taking"), h("label", { class: "check" }, noTurns, "No turn events"), turns.els, h("label", {}, "Other turn settings (JSON) ", advTurns))),
-    h("label", { class: "check" }, isDefault, "Default profile"),
+    h("label", {}, `${t("Name")} `, name),
+    h("div", { class: "grid2" }, h("fieldset", {}, h("legend", {}, t("Audio")), audio.els, h("label", {}, `${t("Other audio settings (JSON)")} `, advAudio)), h("fieldset", {}, h("legend", {}, t("Turn-taking")), h("label", { class: "check" }, noTurns, t("No turn events")), turns.els, h("label", {}, `${t("Other turn settings (JSON)")} `, advTurns))),
+    h("label", { class: "check" }, isDefault, t("Default profile")),
     err,
   );
-  const d = dialog(p ? `Edit ${p.name}` : "New profile", body, [
-    h("button", { class: "secondary", value: "cancel" }, "Cancel"),
+  const d = dialog(p ? t("Edit {name}", { name: p.name }) : t("New profile"), body, [
+    h("button", { class: "secondary", value: "cancel" }, t("Cancel")),
     h("button", {
       onclick: async (e) => {
         e.preventDefault();
@@ -414,17 +497,17 @@ function editProfile(p) {
           d.close();
           render();
         } catch (ex) {
-          err.textContent = ex instanceof SyntaxError ? `Invalid JSON: ${ex.message}` : ex.message;
+          err.textContent = ex instanceof SyntaxError ? t("Invalid JSON: {msg}", { msg: ex.message }) : ex.message;
         }
       },
-    }, "Save"),
+    }, t("Save")),
   ]);
 }
 
 function deleteProfile(p) {
-  const d = dialog(`Delete ${p.name}?`, h("p", {}, "Clients that ask for this profile will be refused."), [
-    h("button", { class: "secondary", value: "cancel" }, "Cancel"),
-    h("button", { class: "danger", onclick: async (e) => { e.preventDefault(); await api("DELETE", `/v1/profiles/${p.id}`); d.close(); render(); } }, "Delete"),
+  const d = dialog(t("Delete {name}?", { name: p.name }), h("p", {}, t("Clients that ask for this profile will be refused.")), [
+    h("button", { class: "secondary", value: "cancel" }, t("Cancel")),
+    h("button", { class: "danger", onclick: async (e) => { e.preventDefault(); await api("DELETE", `/v1/profiles/${p.id}`); d.close(); render(); } }, t("Delete")),
   ]);
 }
 
@@ -436,20 +519,20 @@ async function sessions() {
   return h(
     "div",
     {},
-    h("div", { class: "row" }, h("h1", {}, "Recent sessions"), exportButtons("/v1/sessions/export", "sessions")),
-    h("div", { class: "card" }, list.length ? h("table", {}, h("thead", {}, h("tr", {}, ["Started", "Mode", "Duration", "Status", "SNR dB", "Lost audio %", "Clipped %", "Turns", "Engine"].map((t) => h("th", {}, t)))), h("tbody", {}, list.map((s) => h(
+    h("div", { class: "row" }, h("h1", {}, t("Recent sessions")), exportButtons("/v1/sessions/export", "sessions")),
+    h("div", { class: "card" }, list.length ? table(t("Recent sessions"), [t("Started"), t("Mode"), t("Duration"), t("Status"), t("SNR dB"), t("Lost audio %"), t("Clipped %"), t("Turns"), t("Engine")], list.map((s) => h(
       "tr",
       {},
       h("td", {}, fmtDate(s.started_at)),
-      h("td", {}, s.mode),
-      h("td", {}, `${s.audio_seconds.toFixed(1)} s`),
-      h("td", {}, h("span", { class: `pill ${s.status === "ended" ? "good" : s.status === "failed" ? "bad" : ""}` }, s.status), " ", h("span", { class: "muted" }, s.close_reason || "")),
+      h("td", {}, t(s.mode)),
+      h("td", {}, t("{n} s", { n: s.audio_seconds.toFixed(1) })),
+      h("td", {}, pill(s.status, s.status === "ended" ? true : s.status === "failed" ? false : undefined), " ", h("span", { class: "muted", dir: "auto" }, s.close_reason || "")),
       h("td", {}, String(q(s, "snr_db"))),
       h("td", {}, String(q(s, "concealed_pct"))),
       h("td", {}, String(q(s, "clipped_pct"))),
       h("td", {}, String(s.event_counts?.end_of_turn ?? 0)),
       h("td", { class: "mono" }, (s.backends || []).join(", ")),
-    )))) : h("p", { class: "muted" }, "No sessions yet.")),
+    ))) : h("p", { class: "muted" }, t("No sessions yet."))),
   );
 }
 
@@ -463,7 +546,7 @@ async function download(path, filename) {
   const url = new URL(path, location.origin);
   if (state.me?.superadmin && state.org) url.searchParams.set("org_id", state.org);
   const res = await fetch(url, { headers, credentials: "same-origin" });
-  if (!res.ok) throw new ApiError(res.status, `export failed (${res.status})`);
+  if (!res.ok) throw new ApiError(res.status, t("export failed ({status})", { status: res.status }));
   const blobUrl = URL.createObjectURL(await res.blob());
   const a = h("a", { href: blobUrl, download: filename });
   document.body.append(a);
@@ -477,9 +560,9 @@ function exportButtons(path, name) {
   return h(
     "div",
     {},
-    h("button", { class: "secondary", onclick: () => download(`${path}?format=csv`, `${name}-${today}.csv`) }, "Export CSV"),
+    h("button", { class: "secondary", onclick: () => download(`${path}?format=csv`, `${name}-${today}.csv`) }, t("Export CSV")),
     " ",
-    h("button", { class: "secondary", onclick: () => download(`${path}?format=jsonl`, `${name}-${today}.jsonl`) }, "Export JSON Lines"),
+    h("button", { class: "secondary", onclick: () => download(`${path}?format=jsonl`, `${name}-${today}.jsonl`) }, t("Export JSON Lines")),
   );
 }
 
@@ -490,8 +573,8 @@ async function team() {
     api("GET", "/v1/sso/members"),
     fetch("/auth/oidc/status").then((r) => r.json()).catch(() => ({ enabled: false })),
   ]);
-  const email = h("input", { type: "text", placeholder: "name@company.com", "aria-label": "Email" });
-  const role = h("select", { "aria-label": "Role" }, h("option", { value: "admin" }, "admin"), h("option", { value: "viewer" }, "viewer (usage only)"));
+  const email = h("input", { type: "email", placeholder: "name@company.com", "aria-label": t("Email"), dir: "ltr", autocomplete: "off" });
+  const role = h("select", { "aria-label": t("Role") }, h("option", { value: "admin" }, t("admin")), h("option", { value: "viewer" }, t("viewer (usage only)")));
   const err = h("p", { class: "error", role: "alert" });
   const add = async () => {
     try {
@@ -504,25 +587,25 @@ async function team() {
   return h(
     "div",
     {},
-    h("h1", {}, "Team"),
-    h("p", { class: "muted" }, sso.enabled ? "People listed here can sign in to this dashboard with your company's single sign-on." : "Single sign-on is not configured on this server; members are kept for when it is."),
-    h("div", { class: "card" }, h("div", { class: "row" }, email, role, h("button", { onclick: add }, "Add")), err),
-    h("div", { class: "card" }, members.length ? h("table", {}, h("thead", {}, h("tr", {}, ["Email", "Role", "Added", "Last sign-in", ""].map((t) => h("th", {}, t)))), h("tbody", {}, members.map((m) => h(
+    h("h1", {}, t("Team")),
+    h("p", { class: "muted" }, sso.enabled ? t("People listed here can sign in to this dashboard with your company's single sign-on.") : t("Single sign-on is not configured on this server; members are kept for when it is.")),
+    h("div", { class: "card" }, h("div", { class: "row" }, email, role, h("button", { onclick: add }, t("Add"))), err),
+    h("div", { class: "card" }, members.length ? table(t("Team"), [t("Email"), t("Role"), t("Added"), t("Last sign-in"), t("Actions")], members.map((m) => h(
       "tr",
       {},
-      h("td", {}, m.email),
-      h("td", {}, m.role),
+      h("td", { dir: "ltr", class: "start" }, m.email),
+      h("td", {}, t(m.role)),
       h("td", {}, fmtDate(m.created_at)),
-      h("td", {}, m.last_login_at ? fmtDate(m.last_login_at) : h("span", { class: "muted" }, "never")),
-      h("td", {}, h("button", { class: "danger", onclick: () => removeMember(m) }, "Remove")),
-    )))) : h("p", { class: "muted" }, "No members yet.")),
+      h("td", {}, m.last_login_at ? fmtDate(m.last_login_at) : h("span", { class: "muted" }, t("never"))),
+      h("td", {}, h("button", { class: "danger", "aria-label": t("Remove {email}", { email: m.email }), onclick: () => removeMember(m) }, t("Remove"))),
+    ))) : h("p", { class: "muted" }, t("No members yet."))),
   );
 }
 
 function removeMember(m) {
-  const d = dialog(`Remove ${m.email}?`, h("p", {}, "They are signed out at once."), [
-    h("button", { class: "secondary", value: "cancel" }, "Cancel"),
-    h("button", { class: "danger", onclick: async (e) => { e.preventDefault(); await api("DELETE", `/v1/sso/members/${m.id}`); d.close(); render(); } }, "Remove"),
+  const d = dialog(t("Remove {email}?", { email: m.email }), h("p", {}, t("They are signed out at once.")), [
+    h("button", { class: "secondary", value: "cancel" }, t("Cancel")),
+    h("button", { class: "danger", onclick: async (e) => { e.preventDefault(); await api("DELETE", `/v1/sso/members/${m.id}`); d.close(); render(); } }, t("Remove")),
   ]);
 }
 
@@ -534,18 +617,18 @@ async function billing() {
   return h(
     "div",
     {},
-    h("h1", {}, "Billing"),
-    h("p", { class: "muted" }, "Audio is reported to billing each hour, in whole seconds, when calls end."),
-    h("div", { class: "tiles" }, tile(fmtMin(total / 60), "minutes reported (listed hours)"), tile(String(reports.filter((r) => r.status === "failed").length), "hours waiting to retry")),
-    h("div", { class: "card" }, reports.length ? h("table", {}, h("thead", {}, h("tr", {}, ["Hour (UTC)", "Recorded s", "Reported s", "Status", "Sent"].map((t) => h("th", {}, t)))), h("tbody", {}, reports.map((r) => h(
+    h("h1", {}, t("Billing")),
+    h("p", { class: "muted" }, t("Audio is reported to billing each hour, in whole seconds, when calls end.")),
+    h("div", { class: "tiles" }, tile(fmtMin(total / 60), t("minutes reported (listed hours)")), tile(String(reports.filter((r) => r.status === "failed").length), t("hours waiting to retry"))),
+    h("div", { class: "card" }, reports.length ? table(t("Billing"), [t("Hour (UTC)"), t("Recorded s"), t("Reported s"), t("Status"), t("Sent")], reports.map((r) => h(
       "tr",
       {},
-      h("td", {}, String(r.period_start).replace("T", " ").slice(0, 16)),
+      h("td", { dir: "ltr", class: "start" }, String(r.period_start).replace("T", " ").slice(0, 16)),
       h("td", {}, r.audio_seconds.toFixed(1)),
       h("td", {}, String(r.reported_seconds)),
-      h("td", {}, h("span", { class: `pill ${r.status === "sent" ? "good" : "bad"}` }, r.status), r.error ? h("span", { class: "muted" }, ` ${r.error}`) : null),
+      h("td", {}, pill(r.status, r.status === "sent" ? true : r.status === "failed" ? false : undefined), r.error ? h("span", { class: "muted", dir: "auto" }, ` ${r.error}`) : null),
       h("td", {}, fmtDate(r.sent_at)),
-    )))) : h("p", { class: "muted" }, "Nothing reported yet (billing is off, or no calls have ended).")),
+    ))) : h("p", { class: "muted" }, t("Nothing reported yet (billing is off, or no calls have ended)."))),
   );
 }
 
@@ -556,30 +639,30 @@ async function audit() {
   return h(
     "div",
     {},
-    h("div", { class: "row" }, h("h1", {}, "Audit log"), exportButtons("/v1/audit/export", "audit")),
-    h("div", { class: "card" }, h("table", {}, h("thead", {}, h("tr", {}, ["When", "Who", "Action", "Details"].map((t) => h("th", {}, t)))), h("tbody", {}, list.map((a) => h("tr", {}, h("td", {}, fmtDate(a.at)), h("td", { class: "mono" }, a.actor), h("td", {}, a.action), h("td", { class: "mono" }, JSON.stringify(a.details))))))),
+    h("div", { class: "row" }, h("h1", {}, t("Audit log")), exportButtons("/v1/audit/export", "audit")),
+    h("div", { class: "card" }, table(t("Audit log"), [t("When"), t("Who"), t("Action"), t("Details")], list.map((a) => h("tr", {}, h("td", {}, fmtDate(a.at)), h("td", { class: "mono" }, a.actor), h("td", { class: "mono" }, a.action), h("td", { class: "mono wrap" }, JSON.stringify(a.details)))))),
   );
 }
 
 // ---- organizations (super-admin) -------------------------------------------------------
 
 async function orgs() {
-  if (!state.me.superadmin) return h("p", { class: "error" }, "Super-admin only.");
+  if (!state.me.superadmin) return h("p", { class: "error" }, t("Super-admin only."));
   await loadOrgs();
   return h(
     "div",
     {},
-    h("div", { class: "row" }, h("h1", {}, "Organizations"), h("button", { onclick: () => editOrg(null) }, "New organization")),
-    h("div", { class: "card" }, h("table", {}, h("thead", {}, h("tr", {}, ["Name", "ID", "Active", "Concurrent", "Quota (min/month)", ""].map((t) => h("th", {}, t)))), h("tbody", {}, state.orgs.map((o) => h(
+    h("div", { class: "row" }, h("h1", {}, t("Organizations")), h("button", { onclick: () => editOrg(null) }, t("New organization"))),
+    h("div", { class: "card" }, table(t("Organizations"), [t("Name"), t("ID"), t("Active"), t("Concurrent"), t("Quota (min/month)"), t("Actions")], state.orgs.map((o) => h(
       "tr",
       {},
-      h("td", {}, o.name),
+      h("td", { dir: "auto" }, o.name),
       h("td", { class: "mono" }, o.id),
-      h("td", {}, h("span", { class: `pill ${o.active ? "good" : "bad"}` }, o.active ? "active" : "suspended")),
+      h("td", {}, pill(o.active ? "active" : "suspended", o.active)),
       h("td", {}, String(o.max_concurrent_sessions)),
-      h("td", {}, o.monthly_minutes_quota ?? "none"),
-      h("td", {}, h("button", { class: "secondary", onclick: () => editOrg(o) }, "Edit"), " ", h("button", { class: "link", onclick: () => { state.org = o.id; $("#org-pick").value = o.id; location.hash = "#/overview"; } }, "Open")),
-    ))))),
+      h("td", {}, o.monthly_minutes_quota ?? t("none")),
+      h("td", {}, h("button", { class: "secondary", "aria-label": t("Edit {name}", { name: o.name }), onclick: () => editOrg(o) }, t("Edit")), " ", h("button", { class: "link", "aria-label": t("Open {name}", { name: o.name }), onclick: () => { state.org = o.id; $("#org-pick").value = o.id; location.hash = "#/overview"; } }, t("Open"))),
+    )))),
   );
 }
 
@@ -587,12 +670,12 @@ function editOrg(o) {
   const name = h("input", { type: "text", value: o?.name ?? "", required: true });
   const conc = h("input", { type: "number", min: 1, value: o?.max_concurrent_sessions ?? 10 });
   const quota = h("input", { type: "number", min: 0, value: o?.monthly_minutes_quota ?? "" });
-  const allow = h("textarea", {}, (o?.relay_allowlist ?? []).join("\n"));
+  const allow = h("textarea", { dir: "ltr" }, (o?.relay_allowlist ?? []).join("\n"));
   const active = h("input", { type: "checkbox", checked: o ? o.active : true });
   const err = h("p", { class: "error", role: "alert" });
-  const body = h("div", {}, h("label", {}, "Name ", name), h("label", {}, "Concurrent sessions ", conc), h("label", {}, "Monthly minutes quota (empty: none) ", quota), h("label", {}, "Relay allowlist, one host per line ", allow), o ? h("label", { class: "check" }, active, "Active") : null, err);
-  const d = dialog(o ? `Edit ${o.name}` : "New organization", body, [
-    h("button", { class: "secondary", value: "cancel" }, "Cancel"),
+  const body = h("div", {}, h("label", {}, `${t("Name")} `, name), h("label", {}, `${t("Concurrent sessions")} `, conc), h("label", {}, `${t("Monthly minutes quota (empty: none)")} `, quota), h("label", {}, `${t("Relay allowlist, one host per line")} `, allow), o ? h("label", { class: "check" }, active, t("Active")) : null, err);
+  const d = dialog(o ? t("Edit {name}", { name: o.name }) : t("New organization"), body, [
+    h("button", { class: "secondary", value: "cancel" }, t("Cancel")),
     h("button", {
       onclick: async (e) => {
         e.preventDefault();
@@ -616,7 +699,7 @@ function editOrg(o) {
           err.textContent = ex.message;
         }
       },
-    }, "Save"),
+    }, t("Save")),
   ]);
 }
 

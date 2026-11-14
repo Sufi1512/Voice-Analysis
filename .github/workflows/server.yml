@@ -48,7 +48,11 @@ jobs:
           ruff check src tests ../nexora-client/src
           ruff format --check src tests ../nexora-client/src
           mypy src ../nexora-client/src
+      - name: Accessibility checker for the dashboard test
+        run: npm install --prefix "$RUNNER_TEMP/axe" --no-audit --no-fund axe-core@4
       - name: Tests
+        env:
+          NEXORA_AXE_JS: ${{ runner.temp }}/axe/node_modules/axe-core/axe.min.js
         run: pytest -q
 
   # The Kubernetes manifests on a real (kind) cluster: read-only pods become ready,
