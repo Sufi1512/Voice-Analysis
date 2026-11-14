@@ -1,5 +1,6 @@
 """End-to-end: NexoraAudio.process_chunk and process_file, for each noise backend."""
 
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -40,7 +41,11 @@ class TestProcessChunk:
         assert all(o.shape == (480,) and o.dtype == np.float32 for o in outs)
         assert audio.backends == [audio.config.noise_backend]
         assert audio.latency.algorithmic_ms == pytest.approx(LATENCY_MS[audio.backends[0]])
-        assert audio.timing.count == 100 and audio.timing.p99_ms < 10.0
+        # 10 ms frames: the typical frame must be far quicker than real time. The 99th
+        # percentile mostly measures the scheduler; macOS CI VMs pause processes for
+        # 10+ ms (even RNNoise, ~0.1 ms of work, hit 12 ms there; OPEN_ISSUES I-034)
+        assert audio.timing.count == 100 and audio.timing.p50_ms < 2.0
+        assert audio.timing.p99_ms < (25.0 if sys.platform == "darwin" else 10.0)
 
     def test_int16_in_int16_out_and_2d_layout(self, audio: NexoraAudio) -> None:
         x = (speech(48000)[:4800] * 20000).astype(np.int16)

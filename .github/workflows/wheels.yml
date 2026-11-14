@@ -36,9 +36,6 @@ jobs:
           mkdir -p nexora-audio/src/nexora_audio/_native/${{ matrix.plat }}
           cp "$RUNNER_TEMP/native/${{ matrix.plat }}"/lib* "$RUNNER_TEMP/native/${{ matrix.plat }}/BUILD_INFO.txt" \
              nexora-audio/src/nexora_audio/_native/${{ matrix.plat }}/
-          if [ "${{ matrix.plat }}" = darwin-aarch64 ]; then
-            rm nexora-audio/src/nexora_audio/_native/darwin-aarch64/libdf.dylib  # OPEN_ISSUES I-031
-          fi
       - name: Keep only this platform's native libraries
         working-directory: nexora-audio
         run: |

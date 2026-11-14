@@ -8,7 +8,10 @@ set -euo pipefail
 
 OUT=${1:?usage: build_native.sh OUTDIR}
 HERE=$(cd "$(dirname "$0")" && pwd)
-WORK=$(mktemp -d)
+# a fixed build folder: Cargo hashes crate paths into symbol names, so a random folder
+# would give a different binary each time (reproducible builds, OPEN_ISSUES I-023)
+WORK=${NEXORA_NATIVE_WORK:-/tmp/nexora-native-build}
+rm -rf "${WORK:?}" && mkdir -p "$WORK"
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')
 ARCH=$(uname -m); [ "$ARCH" = arm64 ] && ARCH=aarch64
 TAG="$OS-$ARCH"
@@ -60,7 +63,9 @@ CARGO_DIR=${CARGO_HOME:-$HOME/.cargo}
 cp "$WORK/dfn/target/release/libdf.$EXT" "$DEST/libdf.$EXT"
 
 echo "== nexora_aec (WebRTC AEC3)"
-( cd "$HERE/nexora-aec" && CARGO_TARGET_DIR="$WORK/aec" cargo build -q --release --locked )
+( cd "$HERE/nexora-aec" && CARGO_TARGET_DIR="$WORK/aec" \
+    RUSTFLAGS="--remap-path-prefix=$CARGO_DIR=/cargo --remap-path-prefix=$HERE=/src --remap-path-prefix=$WORK=/build" \
+    cargo build -q --release --locked )
 cp "$WORK/aec/release/libnexora_aec.$EXT" "$DEST/libnexora_aec.$EXT"
 
 for f in "$DEST"/*."$EXT"; do strip_lib "$f"; set_id "$f"; done
