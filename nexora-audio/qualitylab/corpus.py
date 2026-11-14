@@ -418,6 +418,11 @@ def build(profile: str) -> Iterator[Case]:
         yield turn_case(clip(8), clips[clip(8)], [500, 900])
         if "clnsp19" in clips:
             yield turn_case("clnsp19", clips["clnsp19"], [900], at_s=[7.76])
+        # four of the full profile's turn cases too: a median over two turns flipped with
+        # one case (OPEN_ISSUES I-042)
+        for i, plan in enumerate([[400, 800], [600, 1000], [500, 1200], [700, 900]]):
+            c = clip(i + 13)
+            yield turn_case(c, clips[c], plan)
         return
     if profile != "full":
         raise ValueError(f"unknown profile {profile!r}")

@@ -56,6 +56,16 @@ jobs:
         run: python -m qualitylab fetch --stt
       - name: Quality gates (${{ env.PROFILE }})
         run: python -m qualitylab run --profile "$PROFILE"
+      - name: Turn cases on failure (diagnosis)
+        if: failure()
+        run: |
+          python - <<'EOF'
+          import json, glob
+          for f in glob.glob("qualitylab/out/results-*.json"):
+              for r in json.load(open(f))["rows"]:
+                  if r["set"] == "turns":
+                      print(r["id"], {k: r.get(k) for k in ("reply_gap_ms", "pauses_cut", "end_text_unfinished")})
+          EOF
       - name: Upload report
         if: always()
         uses: actions/upload-artifact@v4
