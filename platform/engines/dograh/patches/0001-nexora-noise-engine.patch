@@ -1,0 +1,141 @@
+diff --git a/api/schemas/workflow_configurations.py b/api/schemas/workflow_configurations.py
+index 0e016ce..1a3f3d0 100644
+--- a/api/schemas/workflow_configurations.py
++++ b/api/schemas/workflow_configurations.py
+@@ -128,7 +128,7 @@ class NoiseReductionConfigurationDefaults(BaseModel):
+     model_config = ConfigDict(extra="allow")
+ 
+     enabled: bool = False
+-    engine: Literal["rnnoise"] = "rnnoise"
++    engine: Literal["rnnoise", "nexora"] = "rnnoise"
+ 
+ 
+ class PromptVariablesConfiguration(BaseModel):
+diff --git a/api/services/pipecat/noise_reduction/factory.py b/api/services/pipecat/noise_reduction/factory.py
+index f8c1ea6..46fe402 100644
+--- a/api/services/pipecat/noise_reduction/factory.py
++++ b/api/services/pipecat/noise_reduction/factory.py
+@@ -1,5 +1,7 @@
+ """Builds the per-call input audio filter from a workflow's configuration."""
+ 
++import json
++import os
+ from collections.abc import Callable
+ 
+ from loguru import logger
+@@ -11,8 +13,24 @@ from api.services.pipecat.noise_reduction.rnnoise import RNNoiseAudioFilter
+ from api.services.pipecat.noise_reduction.safe_filter import SafeAudioFilter
+ from pipecat.audio.filters.base_audio_filter import BaseAudioFilter
+ 
++
++
++def _nexora_filter() -> BaseAudioFilter:
++    """NEXORA audio engine (DeepFilterNet3 with speech guard, loss concealment).
++
++    Optional dependency: install ``nexora-audio`` (without its ``pipecat`` extra, so this
++    fork of Pipecat stays in place). Settings come from ``NEXORA_AUDIO_SETTINGS``, a JSON
++    object of nexora-audio settings, e.g. ``{"noise_backend": "rnnoise"}``.
++    """
++    from nexora_audio.integrations.pipecat import NexoraAudioFilter
++
++    settings = json.loads(os.getenv("NEXORA_AUDIO_SETTINGS") or "{}")
++    return NexoraAudioFilter(**settings)
++
++
+ ENGINES: dict[str, Callable[[], BaseAudioFilter]] = {
+     "rnnoise": RNNoiseAudioFilter,
++    "nexora": _nexora_filter,
+ }
+ 
+ 
+@@ -37,4 +55,9 @@ def build_audio_in_filter(
+     if not config.enabled:
+         return None
+ 
+-    return SafeAudioFilter(ENGINES[config.engine](), config.engine)
++    try:
++        engine = ENGINES[config.engine]()
++    except Exception as e:  # missing optional package or bad settings: never fail the call
++        logger.warning(f"Noise engine {config.engine!r} unavailable ({e}); using rnnoise")
++        return SafeAudioFilter(RNNoiseAudioFilter(), "rnnoise")
++    return SafeAudioFilter(engine, config.engine)
+diff --git a/api/tests/test_noise_reduction.py b/api/tests/test_noise_reduction.py
+index cf4fca7..30c957f 100644
+--- a/api/tests/test_noise_reduction.py
++++ b/api/tests/test_noise_reduction.py
+@@ -86,6 +86,32 @@ def test_workflow_defaults_leave_noise_reduction_off():
+     assert config.noise_reduction_configuration.engine == "rnnoise"
+ 
+ 
++def test_nexora_engine_falls_back_to_rnnoise_when_unavailable(monkeypatch):
++    def missing():
++        raise ImportError("No module named 'nexora_audio'")
++
++    monkeypatch.setitem(factory.ENGINES, "nexora", missing)
++    filt = build_audio_in_filter({"enabled": True, "engine": "nexora"})
++
++    assert isinstance(filt, SafeAudioFilter)
++    assert isinstance(filt._engine, RNNoiseAudioFilter)
++
++
++@pytest.mark.asyncio
++async def test_nexora_engine_cleans_noise_and_keeps_pace(monkeypatch):
++    pytest.importorskip("nexora_audio")
++    monkeypatch.setenv("NEXORA_AUDIO_SETTINGS", '{"noise_backend": "rnnoise"}')
++    filt = build_audio_in_filter({"enabled": True, "engine": "nexora"})
++    sample_rate = 8000
++    await filt.start(sample_rate)
++    noise = _noise(sample_rate, 2.0)
++    out = np.frombuffer(await _run(filt, noise, sample_rate), dtype=np.int16)
++    await filt.stop()
++
++    assert len(noise) - len(out) <= sample_rate // 10  # only the processing delay
++    assert _rms(out[sample_rate:]) < 0.1 * _rms(noise[sample_rate:])
++
++
+ # --- RNNoise engine --------------------------------------------------------
+ 
+ 
+diff --git a/ui/src/app/workflow/[workflowId]/settings/WorkflowSettingsSections.tsx b/ui/src/app/workflow/[workflowId]/settings/WorkflowSettingsSections.tsx
+index 4d1d7f0..0d7a792 100644
+--- a/ui/src/app/workflow/[workflowId]/settings/WorkflowSettingsSections.tsx
++++ b/ui/src/app/workflow/[workflowId]/settings/WorkflowSettingsSections.tsx
+@@ -614,6 +614,25 @@ function GeneralSection({
+                             }
+                         />
+                     </div>
++                    {noiseReductionConfig.enabled && (
++                        <div className="space-y-2">
++                            <Label htmlFor="noise_reduction_engine" className="text-xs">Engine</Label>
++                            <Select
++                                value={noiseReductionConfig.engine}
++                                onValueChange={(value: NoiseReductionConfiguration["engine"]) =>
++                                    setNoiseReductionConfig((prev) => ({ ...prev, engine: value }))
++                                }
++                            >
++                                <SelectTrigger id="noise_reduction_engine">
++                                    <SelectValue placeholder="Select engine" />
++                                </SelectTrigger>
++                                <SelectContent>
++                                    <SelectItem value="rnnoise">RNNoise (light)</SelectItem>
++                                    <SelectItem value="nexora">NEXORA (DeepFilterNet3, speech guard)</SelectItem>
++                                </SelectContent>
++                            </Select>
++                        </div>
++                    )}
+                 </div>
+ 
+                 <Separator />
+diff --git a/ui/src/client/types.gen.ts b/ui/src/client/types.gen.ts
+index de768e9..ff81399 100644
+--- a/ui/src/client/types.gen.ts
++++ b/ui/src/client/types.gen.ts
+@@ -3455,7 +3455,7 @@ export type NoiseReductionConfigurationDefaults = {
+     /**
+      * Engine
+      */
+-    engine?: 'rnnoise';
++    engine?: 'rnnoise' | 'nexora';
+     [key: string]: unknown;
+ };
+ 

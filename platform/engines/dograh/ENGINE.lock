@@ -1,0 +1,7 @@
+# Pinned engine versions. Read only: never push to these repositories.
+# Dograh: the audited commit (platform/docs/DOGRAH_DEEP_TECHNICAL_AUDIT.md).
+DOGRAH_REPO=https://github.com/Sufi1512/dograh.git
+DOGRAH_COMMIT=d672de2947da691fbc4542b62b914547a80e01ab
+# Pipecat: Dograh's submodule at that commit.
+PIPECAT_REPO=https://github.com/dograh-hq/pipecat.git
+PIPECAT_COMMIT=9ac08e90be4bb83e506f3d10deaa8e6d31588547
