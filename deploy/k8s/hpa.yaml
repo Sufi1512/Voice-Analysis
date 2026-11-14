@@ -15,7 +15,7 @@ spec:
     - type: Pods
       pods:
         metric: {name: nexora_active_sessions}
-        target: {type: AverageValue, averageValue: "11"}  # 70% of NEXORA_MAX_SESSIONS=16
+        target: {type: AverageValue, averageValue: "5"}  # ~65% of NEXORA_MAX_SESSIONS=8
     - type: Resource
       resource:
         name: cpu

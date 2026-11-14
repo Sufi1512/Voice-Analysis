@@ -6,7 +6,7 @@ metadata:
     app.kubernetes.io/name: nexora-server
 data:
   NEXORA_DEPLOYMENT_MODE: saas
-  NEXORA_MAX_SESSIONS: "16"        # per pod; matches 4 CPUs (see docs/benchmarks)
+  NEXORA_MAX_SESSIONS: "8"         # per pod: ~2 calls per CPU core (E10_RESULTS.md)
   NEXORA_WORKER_THREADS: "4"
   NEXORA_REDIS_URL: redis://nexora-redis:6379/0
   NEXORA_LEASE_TTL_S: "30"

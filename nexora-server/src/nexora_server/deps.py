@@ -78,7 +78,8 @@ def org_for(who: Principal, org_id: str | None) -> str:
         if not org_id:
             raise HTTPException(422, "super-admin must pass org_id")
         return org_id
-    assert who.org_id is not None
+    if who.org_id is None:  # explicit: asserts vanish under python -O
+        raise HTTPException(403, "no organization for this credential")
     if org_id and org_id != who.org_id:
         raise HTTPException(403, "cannot act on another organization")
     return who.org_id

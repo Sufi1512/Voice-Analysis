@@ -13,7 +13,9 @@ log = logging.getLogger("nexora.settings")
 
 
 def _default_capacity() -> int:
-    return 4 * (os.cpu_count() or 1)
+    # measured in E10 (docs/E10_RESULTS.md): about 2 real-time calls per core with the
+    # full default pipeline (noise removal, guards, VAD, Smart Turn) in one process
+    return 2 * (os.cpu_count() or 1)
 
 
 class Settings(BaseModel):

@@ -27,7 +27,7 @@ Interactive API docs: `http://localhost:8080/docs`.
 | `NEXORA_SECRET_KEY` | random (warns) | Signs session tokens, peppers API-key hashes. **Same value on every instance** |
 | `NEXORA_ADMIN_API_KEY` | none | Super-admin key, only for creating organizations |
 | `NEXORA_DEPLOYMENT_MODE` | `saas` | `saas`: relay targets must be `wss://` public hosts. `self_hosted`: allowlist only |
-| `NEXORA_MAX_SESSIONS` | 4 × CPU cores | Instance capacity. Beyond it, connections close with 1013 |
+| `NEXORA_MAX_SESSIONS` | 2 × CPU cores | Instance capacity. Beyond it, connections close with 1013 |
 | `NEXORA_WORKER_THREADS` | CPU cores | Audio processing threads |
 | `NEXORA_IDLE_TIMEOUT_S` | 30 | Close sessions that send nothing (code 4408) |
 | `NEXORA_MAX_MESSAGE_BYTES` | 262144 | Larger audio messages close with 1009 |
@@ -146,9 +146,10 @@ async with NexoraClient("https://voice.example.com", api_key="nx_…") as nx:
 - Logs: one JSON line per event, with `session_id` and `org_id`. Audio and keys are never logged.
 - Usage and billing: `GET /v1/usage` (audio minutes per day, month to date, quota);
   every session is recorded in `/v1/sessions`.
-- Capacity: about 4 concurrent calls per CPU core with the default pipeline
-  (`nexora-audio/docs/benchmarks.md`). Scale out by adding instances behind a
-  WebSocket-capable load balancer. The secret key and database are shared; nothing else is.
+- Capacity: about 2 real-time calls per CPU core with the full default pipeline, one
+  process per instance (measured in `docs/E10_RESULTS.md`). Beyond capacity, or when the
+  audio work queue backs up, new calls get 1013 and clients retry elsewhere. Scale out by
+  adding instances behind a WebSocket-capable load balancer.
 - Warm pool: each instance pre-loads models and keeps recently used session types ready,
   so a new call starts in milliseconds instead of ~0.5 s.
 

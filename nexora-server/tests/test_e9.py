@@ -327,7 +327,8 @@ def test_sso_superadmin_and_logout(sso: Any) -> None:
     me = c.get("/v1/me", headers=CSRF).json()
     assert me["superadmin"] is True and me["actor"] == "superadmin:sso:root@nexora.example"
     assert c.get("/v1/orgs", headers=CSRF).status_code == 200
-    assert c.post("/auth/logout").status_code == 204
+    assert c.post("/auth/logout").status_code == 403  # other sites cannot log you out
+    assert c.post("/auth/logout", headers=CSRF).status_code == 204
     assert c.get("/v1/me", headers=CSRF).status_code == 401
 
 

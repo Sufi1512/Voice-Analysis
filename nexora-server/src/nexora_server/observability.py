@@ -20,6 +20,14 @@ class Metrics:
         )
         self.capacity = Gauge("nexora_capacity_sessions", "Configured session capacity", registry=r)
         self.draining = Gauge("nexora_draining", "1 while the instance drains", registry=r)
+        self.work_queue = Gauge(
+            "nexora_work_queue_depth", "Audio jobs waiting for a worker thread", registry=r
+        )
+        self.record_errors = Counter(
+            "nexora_session_record_errors_total",
+            "Sessions whose end could not be written to the database (check logs to bill)",
+            registry=r,
+        )
         self.limiter_errors = Counter(
             "nexora_limiter_errors_total",
             "Redis limiter calls that failed (fell back to this instance's count)",

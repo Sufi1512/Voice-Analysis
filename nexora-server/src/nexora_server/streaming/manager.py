@@ -123,6 +123,7 @@ class SessionManager:
         self.limiter: OrgLimiter = limiter or LocalOrgLimiter()
         self.renew_every_s = renew_every_s
         self.draining = False
+        self.overload_queue = 2 * worker_threads  # queued jobs before refusing new calls
         self._lock = threading.Lock()
         self._active = 0
         self._pools: dict[SessionSpec, _Pool] = defaultdict(_Pool)
@@ -136,6 +137,15 @@ class SessionManager:
     def active_for(self, org_id: str) -> int:
         return self.limiter.active_for(org_id)
 
+    def queue_depth(self) -> int:
+        """Audio jobs waiting for a worker thread: grows when calls need more CPU than
+        this instance has, long before latency becomes unusable."""
+        q = getattr(self.executor, "_work_queue", None)
+        return int(q.qsize()) if q is not None else 0
+
+    def overloaded(self) -> bool:
+        return self.queue_depth() > self.overload_queue
+
     async def open_slot(self, org_id: str, org_limit: int) -> Lease:
         """Take a slot for a new session, or raise ``CapacityError``."""
         with self._lock:
@@ -143,6 +153,8 @@ class SessionManager:
                 raise CapacityError(1013, "server draining, retry another instance")
             if self._active >= self.max_sessions:
                 raise CapacityError(1013, "server at capacity, retry another instance")
+            if self.overloaded():
+                raise CapacityError(1013, "server overloaded, retry another instance")
             self._active += 1
         try:
             lease = await self.limiter.acquire(org_id, org_limit)

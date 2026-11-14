@@ -6,6 +6,7 @@ import asyncio
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from typing import Any
 
 import nexora_audio
 from fastapi import FastAPI, Request
@@ -103,6 +104,14 @@ def create_app(settings: Settings | None = None, *, prewarm: bool = True) -> Fas
             allow_headers=["authorization", "content-type"],
         )
 
+    @app.middleware("http")
+    async def api_headers(request: Request, call_next: Any) -> Response:
+        response: Response = await call_next(request)
+        if request.url.path.startswith(("/v1/", "/auth/")):
+            response.headers.setdefault("X-Content-Type-Options", "nosniff")
+            response.headers.setdefault("Cache-Control", "no-store")  # keys, tokens, usage
+        return response
+
     app.include_router(api_router)
     app.include_router(ws_router)
     app.include_router(dashboard_router)
@@ -127,13 +136,14 @@ def create_app(settings: Settings | None = None, *, prewarm: bool = True) -> Fas
         except Exception:
             checks["database"] = False
         mgr: SessionManager = state.manager
-        checks["has_capacity"] = mgr.active < mgr.max_sessions
+        checks["has_capacity"] = mgr.active < mgr.max_sessions and not mgr.overloaded()
         checks["not_draining"] = not mgr.draining
         ok = all(checks.values())
         body = {
             "status": "ready" if ok else "not ready",
             "checks": checks,
             "active_sessions": mgr.active,
+            "work_queue": mgr.queue_depth(),
             "draining": mgr.draining,
             "capacity": mgr.max_sessions,
             "warm_sessions": mgr.idle_sessions(),
@@ -143,6 +153,7 @@ def create_app(settings: Settings | None = None, *, prewarm: bool = True) -> Fas
 
     @app.get("/metrics", tags=["ops"], include_in_schema=False)
     def metrics(request: Request) -> Response:
+        request.app.state.metrics.work_queue.set(request.app.state.manager.queue_depth())
         data = generate_latest(request.app.state.metrics.registry)
         return Response(data, media_type=CONTENT_TYPE_LATEST)
 

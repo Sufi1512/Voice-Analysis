@@ -252,9 +252,8 @@ def create_session_token(
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
 ) -> s.TokenOut:
-    if who.is_superadmin:
+    if who.is_superadmin or who.org_id is None:
         raise HTTPException(422, "use an organization API key")
-    assert who.org_id is not None
     try:
         org = get_org(db, who.org_id)
         prof = resolve_profile(db, org.id, body.profile)

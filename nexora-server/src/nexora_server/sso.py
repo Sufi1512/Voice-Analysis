@@ -141,9 +141,8 @@ def _cookie_kwargs(settings: Settings) -> dict[str, Any]:
 
 def provider(request: Request) -> OidcProvider:
     p = getattr(request.app.state, "oidc", None)
-    if p is None:
+    if not isinstance(p, OidcProvider):
         raise HTTPException(404, "single sign-on is not configured")
-    assert isinstance(p, OidcProvider)
     return p
 
 
@@ -242,7 +241,9 @@ def oidc_callback(
 
 
 @router.post("/auth/logout")
-def logout() -> Response:
+def logout(request: Request) -> Response:
+    if request.headers.get(CSRF_HEADER) != "1":  # no logging people out from other sites
+        raise HTTPException(403, "missing X-Nexora-CSRF header")
     resp = Response(status_code=204)
     resp.delete_cookie(SESSION_COOKIE, path="/")
     return resp

@@ -43,6 +43,7 @@ from collections import Counter
 from dataclasses import dataclass
 from typing import Any
 
+import anyio
 import jwt
 from fastapi import APIRouter, WebSocket
 from nexora_audio import AudioFormat, AudioFormatError, StreamSession
@@ -52,7 +53,7 @@ from starlette.websockets import WebSocketDisconnect, WebSocketState
 from nexora_server.db import Database, Organization, SessionRecord, utcnow
 from nexora_server.deps import bearer, principal_from_key
 from nexora_server.observability import Metrics
-from nexora_server.relay_policy import RelayTargetError, check_relay_target
+from nexora_server.relay_policy import RelayTargetError, check_relay_target, open_vetted_socket
 from nexora_server.security import decode_session_token
 from nexora_server.services import ServiceError, quota_remaining_s, resolve_profile
 from nexora_server.settings import Settings
@@ -152,14 +153,25 @@ def _prepare(ws: WebSocket, mode: str, settings: Settings, db: Database) -> Stre
         return StreamContext(org, mode, spec, prof.id if prof else None, key_id, target, left)
 
 
+# what a send to a client that already went away can raise (starlette, anyio, the OS)
+_GONE = (
+    RuntimeError,
+    WebSocketDisconnect,
+    OSError,
+    anyio.ClosedResourceError,
+    anyio.BrokenResourceError,
+)
+
+
 async def _send_json(ws: WebSocket, data: dict[str, Any]) -> None:
     if ws.application_state == WebSocketState.CONNECTED:
-        await ws.send_text(json.dumps(data))
+        with contextlib.suppress(*_GONE):  # a caller who hung up is not an error
+            await ws.send_text(json.dumps(data))
 
 
 async def _close(ws: WebSocket, code: int, reason: str) -> None:
     if ws.application_state == WebSocketState.CONNECTED:
-        with contextlib.suppress(RuntimeError, WebSocketDisconnect):
+        with contextlib.suppress(*_GONE):
             await ws.close(code=code, reason=reason[:120])
 
 
@@ -200,6 +212,23 @@ async def _serve(ws: WebSocket, mode: str) -> None:
     mgr: SessionManager = app.state.manager
     metrics: Metrics = app.state.metrics
     await ws.accept()
+    # cheap refusal first: a full, overloaded or draining instance turns callers away
+    # before spending a database lookup and key check on them (retry storms, floods)
+    busy = (
+        "draining"
+        if mgr.draining
+        else "capacity"
+        if mgr.active >= mgr.max_sessions
+        else "overloaded"
+        if mgr.overloaded()
+        else None
+    )
+    if busy is not None:
+        reason = f"server {'at capacity' if busy == 'capacity' else busy}, retry another instance"
+        metrics.rejections.labels(busy).inc()
+        await _send_json(ws, {"type": "error", "code": 1013, "message": reason})
+        await _close(ws, 1013, reason)
+        return
     try:
         ctx = await run_in_threadpool(_prepare, ws, mode, settings, db)
     except RejectError as r:
@@ -211,7 +240,15 @@ async def _serve(ws: WebSocket, mode: str) -> None:
     try:
         slot = await mgr.open_slot(ctx.org.id, ctx.org.max_concurrent_sessions)
     except CapacityError as c:
-        reason = "org_limit" if c.code == 4429 else "draining" if mgr.draining else "capacity"
+        reason = (
+            "org_limit"
+            if c.code == 4429
+            else "draining"
+            if mgr.draining
+            else "overloaded"
+            if "overloaded" in c.reason
+            else "capacity"
+        )
         metrics.rejections.labels(reason).inc()
         await _send_json(ws, {"type": "error", "code": c.code, "message": c.reason})
         await _close(ws, c.code, c.reason)
@@ -260,42 +297,57 @@ async def _serve(ws: WebSocket, mode: str) -> None:
             run.close_code, run.close_reason = 1011, "internal error"
         await _send_json(ws, {"type": "error", "code": 1011, "message": "internal error"})
     finally:
-        metrics.active.labels(mode).dec()
-        await slot.close()
-        if run is not None:
-            metrics.audio_seconds.labels(mode).inc(run.audio_s)
-            outcome = "ok" if run.close_code in (1000, 1001) else "error"
-            metrics.sessions.labels(mode, outcome).inc()
-            run.quality = run.session.quality()
-            metrics.observe_quality(run.quality)
-            await _send_json(
-                ws,
-                {
-                    "type": "session.ended",
-                    "session_id": record_id,
-                    "audio_seconds": round(run.audio_s, 3),
-                    "events": dict(run.events),
-                    "close_code": run.close_code,
-                    "reason": run.close_reason,
-                    "quality": run.quality,
-                },
-            )
-            if record_id:
-                await run_in_threadpool(_finish_record, db, record_id, run, healthy)
-            log.info(
-                "session ended",
-                extra={
-                    "session_id": record_id,
-                    "org_id": ctx.org.id,
-                    "mode": mode,
-                    "audio_seconds": round(run.audio_s, 3),
-                    "close_code": run.close_code,
-                    "quality": run.quality,
-                },
-            )
-            await _close(ws, run.close_code, run.close_reason)
-        if session is not None:
-            mgr.release(ctx.spec, session, healthy)
+        # every step on its own: one failing (caller gone, database down) must not skip
+        # the others, or the call is never recorded/billed and its audio session leaks
+        # shielded: if the connection task is cancelled (client gone), the cleanup still
+        # runs to the end instead of stopping at its first await
+        with anyio.CancelScope(shield=True):
+            metrics.active.labels(mode).dec()
+            await slot.close()
+            if run is not None:
+                try:
+                    metrics.audio_seconds.labels(mode).inc(run.audio_s)
+                    outcome = "ok" if run.close_code in (1000, 1001) else "error"
+                    metrics.sessions.labels(mode, outcome).inc()
+                    run.quality = run.session.quality()
+                    metrics.observe_quality(run.quality)
+                except Exception:
+                    log.exception("session metrics failed", extra={"session_id": record_id})
+                await _send_json(
+                    ws,
+                    {
+                        "type": "session.ended",
+                        "session_id": record_id,
+                        "audio_seconds": round(run.audio_s, 3),
+                        "events": dict(run.events),
+                        "close_code": run.close_code,
+                        "reason": run.close_reason,
+                        "quality": run.quality,
+                    },
+                )
+                if record_id:
+                    try:
+                        await run_in_threadpool(_finish_record, db, record_id, run, healthy)
+                    except Exception:  # the call happened: log it loudly for reconciliation
+                        log.exception(
+                            "could not record session end",
+                            extra={"session_id": record_id, "audio_seconds": round(run.audio_s, 3)},
+                        )
+                        metrics.record_errors.inc()
+                log.info(
+                    "session ended",
+                    extra={
+                        "session_id": record_id,
+                        "org_id": ctx.org.id,
+                        "mode": mode,
+                        "audio_seconds": round(run.audio_s, 3),
+                        "close_code": run.close_code,
+                        "quality": run.quality,
+                    },
+                )
+                await _close(ws, run.close_code, run.close_reason)
+            if session is not None:
+                mgr.release(ctx.spec, session, healthy)
 
 
 def _fmt_dict(f: AudioFormat) -> dict[str, Any]:
@@ -467,13 +519,27 @@ async def _relay_loop(
 ) -> None:
     import websockets
 
-    assert run.ctx.relay_target is not None
+    target = run.ctx.relay_target
+    if target is None:
+        raise RuntimeError("relay session without a target")
     # re-check right before connecting (DNS may have changed since the token was minted)
-    check_relay_target(run.ctx.relay_target, run.ctx.org.relay_allowlist, settings.deployment_mode)
+    host = check_relay_target(target, run.ctx.org.relay_allowlist, settings.deployment_mode)
     try:
-        agent = await websockets.connect(
-            run.ctx.relay_target, open_timeout=10, max_size=settings.max_message_bytes * 4
+        # SaaS: connect to the address just vetted, never re-resolve (DNS rebinding)
+        sock = await asyncio.get_running_loop().run_in_executor(
+            None, open_vetted_socket, target, settings.deployment_mode
         )
+        extra: dict[str, Any] = {}
+        if sock is not None:
+            extra["sock"] = sock
+            if target.startswith("wss://"):
+                extra["server_hostname"] = host
+        agent = await websockets.connect(
+            target, open_timeout=10, max_size=settings.max_message_bytes * 4, **extra
+        )
+    except RelayTargetError as exc:
+        run.close_code, run.close_reason = 4003, str(exc)[:120]
+        return
     except (OSError, websockets.InvalidHandshake, TimeoutError) as exc:
         run.close_code, run.close_reason = 4502, f"could not reach agent: {type(exc).__name__}"
         return

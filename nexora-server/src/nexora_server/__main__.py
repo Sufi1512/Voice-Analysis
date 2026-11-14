@@ -103,7 +103,13 @@ def main() -> None:
     # one process per instance: audio work runs in the app's own thread pool;
     # scale out with more instances behind a load balancer
     config = uvicorn.Config(
-        app, host=args.host, port=args.port, ws_max_size=16 * 1024 * 1024, log_config=None
+        app,
+        host=args.host,
+        port=args.port,
+        # refuse oversized frames in the protocol layer, before they are buffered; JSON
+        # control messages carry base64 audio (4/3 the size), hence the factor 2
+        ws_max_size=2 * settings.max_message_bytes,
+        log_config=None,
     )
     _server_class()(config, app, settings.drain_timeout_s).run()
 
