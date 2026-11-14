@@ -29,6 +29,8 @@ echo "== RNNoise v0.2"
 curl -sSL -o "$WORK/rnnoise.tar.gz" "$RNNOISE_URL"
 [ "$(sha "$WORK/rnnoise.tar.gz")" = "$RNNOISE_SHA" ] || { echo "rnnoise checksum mismatch"; exit 1; }
 tar xzf "$WORK/rnnoise.tar.gz" -C "$WORK"
+# v0.2's NEON/generic code includes a header the release does not ship (see the file)
+[ -f "$WORK/rnnoise-0.2/src/os_support.h" ] || cp "$HERE/rnnoise-compat/os_support.h" "$WORK/rnnoise-0.2/src/"
 ( cd "$WORK/rnnoise-0.2"
   extra=""; [ "$ARCH" = x86_64 ] && extra="--enable-x86-rtcd"
   ./configure --disable-examples --disable-doc $extra CFLAGS="-O2" >/dev/null
@@ -38,8 +40,9 @@ else cp "$WORK/rnnoise-0.2/.libs/librnnoise.so.0."* "$DEST/librnnoise.so"; fi
 
 echo "== DeepFilterNet libdf @ $DFN_COMMIT"
 git clone -q "$DFN_REPO" "$WORK/dfn" && git -C "$WORK/dfn" checkout -q "$DFN_COMMIT"
+# not --locked: the Cargo.lock at this commit is out of date with its Cargo.toml files
 ( cd "$WORK/dfn" && RUSTFLAGS="--remap-path-prefix=$WORK=/build" \
-    cargo build -q --release --locked -p deep_filter --lib --no-default-features --features capi )
+    cargo build -q --release -p deep_filter --lib --no-default-features --features capi )
 cp "$WORK/dfn/target/release/libdf.$EXT" "$DEST/libdf.$EXT"
 
 echo "== nexora_aec (WebRTC AEC3)"
