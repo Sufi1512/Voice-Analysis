@@ -7,10 +7,10 @@ Run after ``kubectl apply -k deploy/k8s-ci`` and a finished rollout. Talks to th
    container, and a call works end to end;
 2. the organization's concurrent-call limit holds across pods (Redis leases);
 3. scale-in: a pod being shut down refuses new calls (1013) but lets its open call finish;
-4. a pod killed outright: its call is closed as lost by another pod's sweeper, with the
-   audio saved at the last checkpoint.
+4. a server process killed outright (SIGKILL): its call is closed as lost by a sweeper,
+   with the audio saved at the last checkpoint.
 
-Needs: kubectl, Python with httpx, websockets, numpy.
+Needs: kubectl, docker (kind nodes), Python with httpx, websockets, numpy.
 """
 
 from __future__ import annotations
@@ -43,6 +43,24 @@ def kubectl(*args: str, check: bool = True) -> str:
     if check and out.returncode:
         raise RuntimeError(f"kubectl {' '.join(args)}: {out.stderr}")
     return out.stdout
+
+
+def crash(pod: str) -> None:
+    """Kill the pod's server process outright (SIGKILL through the kind node's container
+    runtime). Deleting the pod is not a crash: the server drains and ends calls cleanly."""
+    cid = kubectl(
+        "get", "pod", pod, "-o", "jsonpath={.status.containerStatuses[0].containerID}"
+    )
+    node = kubectl("get", "pod", pod, "-o", "jsonpath={.spec.nodeName}")
+    cid = cid.split("://", 1)[-1]
+    out = subprocess.run(
+        ["docker", "exec", node, "crictl", "stop", "--timeout", "0", cid],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if out.returncode:
+        raise RuntimeError(f"crictl stop: {out.stderr}")
 
 
 def ready_pods() -> list[str]:
@@ -270,7 +288,7 @@ async def main() -> None:
             await call.__aenter__()
             sid = call.started["session_id"]
             await call.send(5.0)  # checkpoints every 2 s in CI
-            kubectl("delete", "pod", victim, "--grace-period=0", "--force")
+            crash(victim)  # SIGKILL: no drain, no cleanup, like a node or process dying
             call.reader.cancel()
 
         def swept() -> dict[str, Any] | None:
