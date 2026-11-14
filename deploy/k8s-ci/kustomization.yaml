@@ -1,11 +1,11 @@
-# CI only: the production manifests (..) on a throwaway kind cluster, with small pods, a
+# CI only: the production manifests (../k8s) on a throwaway kind cluster, with small pods, a
 # throwaway PostgreSQL, fast checkpoints and no autoscaler. Driven by smoke.py.
 # The secret values below are dummy test values for this disposable cluster only.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 namespace: nexora
 resources:
-  - ..
+  - ../k8s
   - postgres.yaml
 secretGenerator:
   - name: nexora-secrets

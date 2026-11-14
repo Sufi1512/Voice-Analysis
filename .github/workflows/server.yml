@@ -57,7 +57,7 @@ jobs:
 
   # The Kubernetes manifests on a real (kind) cluster: read-only pods become ready,
   # migrations run in the init container, org limits hold across pods via Redis, a
-  # draining pod finishes its call, a killed pod's call is swept (deploy/k8s/ci/smoke.py)
+  # draining pod finishes its call, a killed pod's call is swept (deploy/k8s-ci/smoke.py)
   kind:
     runs-on: ubuntu-24.04
     timeout-minutes: 40
@@ -74,7 +74,7 @@ jobs:
       - name: Deploy
         run: |
           kind load docker-image nexora-server:ci --name nexora
-          kubectl apply -k deploy/k8s/ci
+          kubectl apply -k deploy/k8s-ci
           kubectl -n nexora rollout status deploy/nexora-postgres --timeout=5m
           kubectl -n nexora rollout status deploy/nexora-redis --timeout=5m
           kubectl -n nexora rollout status deploy/nexora-server --timeout=15m
@@ -84,7 +84,7 @@ jobs:
       - name: Real-cluster checks
         run: |
           pip install httpx websockets numpy
-          python deploy/k8s/ci/smoke.py
+          python deploy/k8s-ci/smoke.py
       - name: Cluster state on failure
         if: failure()
         run: |

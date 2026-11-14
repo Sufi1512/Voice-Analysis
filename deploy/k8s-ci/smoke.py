@@ -1,6 +1,6 @@
 """Real-cluster checks for the Kubernetes manifests (CI, on kind). OPEN_ISSUES I-017/I-020.
 
-Run after ``kubectl apply -k deploy/k8s/ci`` and a finished rollout. Talks to the pods with
+Run after ``kubectl apply -k deploy/k8s-ci`` and a finished rollout. Talks to the pods with
 ``kubectl port-forward`` and checks, on a real cluster:
 
 1. the pods became ready with a read-only root file system, migrations ran in the init
@@ -32,7 +32,7 @@ import websockets
 NS = "nexora"
 ADMIN = {
     "Authorization": "Bearer ci-only-admin-key"
-}  # dummy value from ci/kustomization
+}  # dummy value from k8s-ci/kustomization
 CHUNK = 320 * 2  # 20 ms of 16 kHz pcm16
 
 
