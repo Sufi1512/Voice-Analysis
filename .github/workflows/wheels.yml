@@ -1,7 +1,8 @@
 name: wheels
 
-# E7: one nexora-audio wheel per platform, each with only its own native libraries, then a
-# clean install and the test suite on that platform. Run on demand or for a release tag.
+# E7: one nexora-audio wheel per platform, each with only its own native libraries (built
+# here from pinned sources, except the committed linux-x86_64 ones), then a clean install
+# and the test suite on that platform. Run on demand or for a release tag.
 
 on:
   workflow_dispatch:
@@ -24,10 +25,23 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: {python-version: "3.13"}
+      - uses: dtolnay/rust-toolchain@stable
+        if: matrix.plat != 'linux-x86_64'
+      - name: Build this platform's native libraries from pinned sources
+        if: matrix.plat != 'linux-x86_64'  # linux-x86_64's are committed (PROVENANCE.md)
+        run: |
+          pip install meson ninja
+          if [ "$RUNNER_OS" = macOS ]; then brew install autoconf automake libtool; fi
+          nexora-audio/native/build_native.sh "$RUNNER_TEMP/native"
+          mkdir -p nexora-audio/src/nexora_audio/_native/${{ matrix.plat }}
+          cp "$RUNNER_TEMP/native/${{ matrix.plat }}"/lib* "$RUNNER_TEMP/native/${{ matrix.plat }}/BUILD_INFO.txt" \
+             nexora-audio/src/nexora_audio/_native/${{ matrix.plat }}/
+          if [ "${{ matrix.plat }}" = darwin-aarch64 ]; then
+            rm nexora-audio/src/nexora_audio/_native/darwin-aarch64/libdf.dylib  # OPEN_ISSUES I-031
+          fi
       - name: Keep only this platform's native libraries
         working-directory: nexora-audio
         run: |
-          test -d src/nexora_audio/_native/${{ matrix.plat }} || { echo "no libraries for ${{ matrix.plat }} committed yet"; exit 1; }
           find src/nexora_audio/_native -mindepth 1 -maxdepth 1 -type d ! -name licenses ! -name ${{ matrix.plat }} -exec rm -rf {} +
       - name: Build wheel
         working-directory: nexora-audio
