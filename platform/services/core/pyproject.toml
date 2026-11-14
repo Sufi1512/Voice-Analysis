@@ -48,8 +48,9 @@ select = ["ALL"]
 ignore = ["D", "CPY001", "COM812", "ISC001", "ANN401", "TRY003", "EM101", "EM102", "FBT001", "FBT002"]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["S101", "PLR2004", "ANN", "ARG001", "INP001", "S105", "S106"]
-"migrations/**" = ["INP001", "ANN"]
+# tests: SQL built only from fixed table-name lists; transactions need several statements inside raises
+"tests/**" = ["S101", "PLR2004", "ANN", "ARG001", "INP001", "S105", "S106", "S608", "E501", "PT012"]
+"**/migrations/**" = ["INP001", "ANN", "E501"]  # SQL DDL reads better unwrapped
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
