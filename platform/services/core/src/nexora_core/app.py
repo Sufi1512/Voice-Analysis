@@ -4,17 +4,20 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import APIRouter, FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
+from fastapi.routing import APIRoute
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from nexora_core.api.auth import router as auth_router
+from nexora_core.api.organizations import router as organizations_router
 from nexora_core.auth.csrf import CsrfMiddleware
 from nexora_core.logging import configure_logging, get_logger
 from nexora_core.settings import Settings
 
 log = get_logger(__name__)
+ROUTERS: tuple[APIRouter, ...] = (auth_router, organizations_router)
 READY_TIMEOUT_S = 2.0
 
 
@@ -34,11 +37,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.engine = engine
     app.state.clock = lambda: datetime.now(UTC)
     app.add_middleware(CsrfMiddleware)
-    app.include_router(auth_router)
+    app.state.routers = ROUTERS
+    for router in ROUTERS:
+        app.include_router(router)
 
     @app.exception_handler(HTTPException)
     async def http_error(_request: Request, exc: HTTPException) -> JSONResponse:
-        return JSONResponse(status_code=exc.status_code, content={"error": exc.detail}, headers=exc.headers)
+        content = exc.detail if isinstance(exc.detail, dict) else {"error": exc.detail}
+        return JSONResponse(status_code=exc.status_code, content=content, headers=exc.headers)
 
     @app.get("/healthz", include_in_schema=False)
     async def healthz() -> dict[str, str]:
@@ -60,3 +66,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
 
     return app
+
+
+def api_routes(app: FastAPI) -> list[APIRoute]:
+    """Every /v1 route the app serves (the single list it mounts), for authorization tests."""
+    return [r for router in app.state.routers for r in router.routes if isinstance(r, APIRoute)]

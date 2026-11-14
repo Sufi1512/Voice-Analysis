@@ -49,7 +49,7 @@ ignore = ["D", "CPY001", "COM812", "ISC001", "ANN401", "TRY003", "EM101", "EM102
 
 [tool.ruff.lint.per-file-ignores]
 # tests: SQL built only from fixed table-name lists; transactions need several statements inside raises
-"tests/**" = ["S101", "PLR2004", "ANN", "ARG001", "INP001", "S105", "S106", "S608", "E501", "PT012"]
+"tests/**" = ["S101", "PLR2004", "ANN", "ARG001", "INP001", "S105", "S106", "S608", "E501", "PT012", "PLR0913", "PLR0917"]
 "**/migrations/**" = ["INP001", "ANN", "E501"]  # SQL DDL reads better unwrapped
 
 [tool.pytest.ini_options]
