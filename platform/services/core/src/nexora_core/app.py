@@ -2,12 +2,15 @@
 
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 
+from nexora_core.api.auth import router as auth_router
+from nexora_core.auth.csrf import CsrfMiddleware
 from nexora_core.logging import configure_logging, get_logger
 from nexora_core.settings import Settings
 
@@ -29,6 +32,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app = FastAPI(title="NEXORA Core", version="0.1.0", lifespan=lifespan)
     app.state.settings = settings
     app.state.engine = engine
+    app.state.clock = lambda: datetime.now(UTC)
+    app.add_middleware(CsrfMiddleware)
+    app.include_router(auth_router)
+
+    @app.exception_handler(HTTPException)
+    async def http_error(_request: Request, exc: HTTPException) -> JSONResponse:
+        return JSONResponse(status_code=exc.status_code, content={"error": exc.detail}, headers=exc.headers)
 
     @app.get("/healthz", include_in_schema=False)
     async def healthz() -> dict[str, str]:

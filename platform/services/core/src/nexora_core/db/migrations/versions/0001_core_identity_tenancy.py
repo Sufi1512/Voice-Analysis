@@ -4,8 +4,9 @@ Two database roles (created outside migrations, by deploy scripts or the test ha
 
 * ``nexora_app``: every authenticated request. Not a table owner, so row-level security
   applies. Each transaction sets ``nexora.org_id``; policies show only that organization.
-* ``nexora_admin``: ``BYPASSRLS``. Only pre-login lookups (user by email, invitation and
-  reset tokens) and platform-owner actions.
+* ``nexora_admin``: ``BYPASSRLS``. Only lookups in tenant tables before an organization is
+  known (invitation tokens) and platform-owner actions. Global tables (users, sessions,
+  reset tokens) have no row-level security, so the app role reads them directly.
 
 Global (not tenant-owned): users, user_identities, user_sessions, password_resets,
 permissions, roles, role_permissions. Tenant-owned: everything with ``organization_id``.
