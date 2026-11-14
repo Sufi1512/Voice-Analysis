@@ -68,6 +68,25 @@ def require(permission: str) -> Callable[..., Awaitable[Principal]]:
     return dependency
 
 
+def require_platform(permission: str) -> Callable[..., Awaitable[str]]:
+    """For /v1/platform routes: only the platform owner; returns their user id."""
+    if permission not in ROLE_PERMISSIONS["platform_owner"]:
+        raise ValueError(f"{permission!r} is not a platform permission")
+
+    async def dependency(session: CurrentSession, conn: Conn) -> str:
+        owner = await conn.scalar(
+            text("SELECT is_platform_owner FROM users WHERE id = :u"), {"u": session.user_id}
+        )
+        if not owner:
+            raise HTTPException(
+                status_code=403, detail={"error": "forbidden", "missing_permission": permission}
+            )
+        return session.user_id
+
+    dependency.permission = permission  # ty: ignore[missing-attribute] - read by route_permission
+    return dependency
+
+
 def route_permission(route: APIRoute) -> str | None:
     """The permission a route requires, for the endpoint-by-role matrix test."""
     for dep in route.dependant.dependencies:

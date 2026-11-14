@@ -18,7 +18,14 @@ from tests.db_harness import APP_ROLE, app_engine, as_role
 
 ORG_ROLES = ["org_owner", "org_admin", "workspace_admin", "developer", "operator", "viewer"]
 # A valid body for every protected route, so "allowed" means the handler ran.
-BODIES = {("PATCH", "/v1/organizations/{org}"): {"name": "Org A"}}
+BODIES = {
+    ("PATCH", "/v1/organizations/{org}"): {"name": "Org A"},
+    ("POST", "/v1/platform/organizations"): {
+        "name": "Matrix",
+        "slug": "matrix-org",
+        "owner_email": "m@example.sa",
+    },
+}
 
 
 @pytest.fixture(scope="module")
@@ -123,6 +130,8 @@ def test_every_organization_route_declares_a_permission(app):
     for route in api_routes(app):
         if "{org}" in route.path:
             assert route_permission(route), f"{route.path} has no require(permission)"
+        if route.path.startswith("/v1/platform/"):
+            assert route_permission(route) == "platform:organizations", route.path
     assert protected_routes(app), "no protected routes found"
 
 

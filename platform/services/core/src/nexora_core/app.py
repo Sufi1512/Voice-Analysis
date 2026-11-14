@@ -3,6 +3,7 @@
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
+from pathlib import Path
 
 from fastapi import APIRouter, FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
@@ -12,12 +13,14 @@ from sqlalchemy.ext.asyncio import create_async_engine
 
 from nexora_core.api.auth import router as auth_router
 from nexora_core.api.organizations import router as organizations_router
+from nexora_core.api.platform import router as platform_router
 from nexora_core.auth.csrf import CsrfMiddleware
+from nexora_core.bootstrap import bootstrap_platform_owner
 from nexora_core.logging import configure_logging, get_logger
 from nexora_core.settings import Settings
 
 log = get_logger(__name__)
-ROUTERS: tuple[APIRouter, ...] = (auth_router, organizations_router)
+ROUTERS: tuple[APIRouter, ...] = (auth_router, organizations_router, platform_router)
 READY_TIMEOUT_S = 2.0
 
 
@@ -29,6 +32,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
+        await bootstrap_platform_owner(
+            engine,
+            email=settings.bootstrap_owner_email,
+            token_file=Path(settings.bootstrap_token_file),
+            now=datetime.now(UTC),
+        )
         yield
         await engine.dispose()
 

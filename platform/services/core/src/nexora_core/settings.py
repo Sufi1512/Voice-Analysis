@@ -26,6 +26,10 @@ class Settings(BaseSettings):
     #: Key-encryption key for stored secrets: base64 of 32 random bytes. Required in production.
     kek: SecretStr = Field(default=SecretStr(""))
     kek_id: str = "local-1"
+    #: First platform owner, created on first start with a single-use set-password token.
+    bootstrap_owner_email: str = ""
+    #: Where that token is written (mode 0600). Mount a private volume here in production.
+    bootstrap_token_file: str = ".nexora/bootstrap-owner-token"  # noqa: S105 - a path, not a secret
 
     @field_validator("kek")
     @classmethod
