@@ -1,0 +1,48 @@
+name: platform-core
+
+# NEXORA Core (platform/services/core): lint, types and tests against PostgreSQL 17.
+# Linux only. Nothing is pushed anywhere.
+
+on:
+  push:
+    branches: [main]
+    paths: ["platform/services/core/**", ".github/workflows/platform-core.yml"]
+  pull_request:
+    paths: ["platform/services/core/**", ".github/workflows/platform-core.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: platform-core-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  core:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 10
+    defaults:
+      run:
+        working-directory: platform/services/core
+    env:
+      NEXORA_TEST_ADMIN_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/postgres
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with: {enable-cache: true}
+      - run: uv sync --all-groups --locked
+      - name: Lint and format
+        run: uv run ruff format --check . && uv run ruff check .
+      - name: Types
+        run: uv run ty check src
+      - name: Tests
+        run: uv run pytest
