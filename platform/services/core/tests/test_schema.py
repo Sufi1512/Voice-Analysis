@@ -4,17 +4,9 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 
-from tests.conftest import ADMIN_URL
-from tests.db_harness import APP_ROLE, app_engine, downgrade, ensure_roles, upgrade
+from tests.db_harness import APP_ROLE, app_engine, downgrade, upgrade
 
 TENANT_TABLES = ["workspaces", "memberships", "invitations", "audit_logs", "secrets"]
-
-
-@pytest.fixture(scope="module")
-async def migrated(database_url):
-    await ensure_roles(ADMIN_URL)
-    await upgrade(database_url)
-    return database_url
 
 
 async def tables(url: str) -> set[str]:
