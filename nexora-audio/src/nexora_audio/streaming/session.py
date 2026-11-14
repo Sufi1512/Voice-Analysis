@@ -302,6 +302,17 @@ class StreamSession:
         if self._turns is not None:
             self._turns.set_agent_speaking(speaking)
 
+    def push_transcript(self, text: str) -> None:
+        """The caller's latest (interim or final) speech-to-text for the current turn.
+
+        If it ends on a word no sentence can end on ("...a lot of", "...because", "um"),
+        the turn waits ``TurnConfig.incomplete_silence_ms`` before ``end_of_turn``. Send it
+        as soon as your STT has it; text for a turn that already ended is ignored.
+        """
+        if self._turns is not None:
+            with self._lock:
+                self._turns.set_transcript(text)
+
     def flush(self) -> SessionOutput:
         """End of stream: return all buffered audio and remaining events."""
         with self._lock:

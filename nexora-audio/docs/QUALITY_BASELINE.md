@@ -175,6 +175,14 @@ measured the between-sentence pauses only. Every other gate is unchanged from E3
 `chunk_time` read 11.3 ms with two workers sharing two CPUs; unloaded, the same cases take
 5.9 ms with Smart Turn and 5.6 ms without.
 
+## Update after E5b (2026-11-14)
+
+E5b (`E5B_SPEC.md`) lets the caller's transcript hold a turn whose last word cannot end a
+sentence. Turn cases now get simulated STT text (Whisper tiny.en) 300 ms into each pause
+when the lab runs with STT. All gates unchanged from E5; the new `text_hold` gate (finished
+turns held up by the text) is 0%. One E5 test point (`clnsp18`) was moved from inside a
+word to the word gap. Report: `docs/quality/report-full-2026-11-14-e5b.md`.
+
 ## Known limits of this baseline
 
 - English speech only; no Arabic yet. No real phone calls, real echo recordings or real

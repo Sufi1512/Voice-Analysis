@@ -227,7 +227,7 @@ def echo_case(
 MID_SENTENCE_POINTS: dict[str, list[float]] = {
     "clnsp15": [3.30, 7.76],
     "clnsp17": [2.15],
-    "clnsp18": [8.55],
+    "clnsp18": [8.37],  # "...can | expect"; 8.55 (E5) was inside "ex|pect", fixed in E5b
     "clnsp19": [7.76],
     "clnsp22": [1.64, 10.12],
 }

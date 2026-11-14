@@ -1,6 +1,6 @@
 {
  "fast": {
-  "chunk_time": 6.57,
+  "chunk_time": 7.749,
   "double_talk_cut": 10.56,
   "erle": 92.8,
   "false_barge_echo": 0.0,
@@ -15,12 +15,13 @@
   "sentence_pause_cut": 100.0,
   "speech_cut": 1.0,
   "stoi_no_harm": -0.0189,
+  "text_hold": 0.0,
   "turn_cutoff": 0.0,
   "wer_clean": 0.0,
   "wer_noisy": -7.142857142857134
  },
  "full": {
-  "chunk_time": 11.31,
+  "chunk_time": 8.773,
   "clause_pause_cut": 36.36363636363637,
   "double_talk_cut": 44.44,
   "erle": 14.4,
@@ -36,6 +37,7 @@
   "sentence_pause_cut": 75.0,
   "speech_cut": 5.16,
   "stoi_no_harm": -0.0666,
+  "text_hold": 0.0,
   "turn_cutoff": 14.285714285714286,
   "wer_clean": 0.4098360655737705,
   "wer_noisy": 10.58931860036834

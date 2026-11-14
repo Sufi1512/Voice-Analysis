@@ -16,8 +16,28 @@ from qualitylab.corpus import Case
 CHUNK_MS = 20
 
 
-def process(case: Case, settings: dict[str, Any]) -> dict[str, Any]:
+STT_DELAY_S = 0.3  # a streaming STT's final arrives about this long into a pause
+
+
+def turn_transcripts(case: Case) -> list[tuple[float, str]]:
+    """(time, text) a streaming STT would send for a turn case: the caller's words up to
+    each pause and up to the true end, STT_DELAY_S after the speech stops. Whisper tiny.en
+    on the last 4 s of clean speech stands in for the customer's STT."""
+    from qualitylab import stt
+
+    rate = case.rate
+    points = [a for a, _ in case.labels["pauses"]] + [case.labels["true_end"]]
+    out = []
+    for t in points:
+        x = case.clean[max(0, round((t - 4.0) * rate)) : round(t * rate)]
+        out.append((t + STT_DELAY_S, stt.transcribe(x, rate)))
+    return out
+
+
+def process(case: Case, settings: dict[str, Any], stt_text: bool = False) -> dict[str, Any]:
     """Stream the case through a StreamSession in 20 ms chunks, as a live call would.
+
+    With ``stt_text`` (turn cases), simulated STT transcripts are pushed during pauses.
 
     Echo cases run with echo cancellation on (what a speakerphone deployment uses) unless
     the run overrides ``echo_cancellation``; the agent audio is pushed as the reference."""
@@ -31,6 +51,8 @@ def process(case: Case, settings: dict[str, Any]) -> dict[str, Any]:
     events: list[dict[str, Any]] = []
     times: list[float] = []
     ref_fmt = AudioFormat(encoding="float32", sample_rate=case.rate)
+    texts = turn_transcripts(case) if stt_text else []
+    end_text = texts[-1][1] if texts else None
     with StreamSession(input_format=fmt, **settings) as sess:
         latency_ms = sess.latency_ms
         speaking = False
@@ -49,6 +71,8 @@ def process(case: Case, settings: dict[str, Any]) -> dict[str, Any]:
             elif now != speaking:
                 sess.set_agent_speaking(now)
                 speaking = now
+            while texts and texts[0][0] <= t:
+                sess.push_transcript(texts.pop(0)[1])
             t0 = time.perf_counter()
             res = sess.process(wire[i : i + step])
             times.append(time.perf_counter() - t0)
@@ -65,6 +89,7 @@ def process(case: Case, settings: dict[str, Any]) -> dict[str, Any]:
         "latency_ms": latency_ms,
         "chunk_p99_ms": float(np.percentile(times, 99) * 1000),
         "backends": backends,
+        "end_text": end_text,
     }
 
 
@@ -81,7 +106,8 @@ def _transcribe_memo(x: np.ndarray, rate: int) -> str:
 
 
 def measure(case: Case, settings: dict[str, Any], use_stt: bool) -> dict[str, Any]:
-    r = process(case, settings)
+    stt_text = use_stt and case.set == "turns"
+    r = process(case, settings, stt_text)
     rate = case.rate
     n = len(case.mic)
     delay = round(r["latency_ms"] * rate / 1000)
@@ -173,6 +199,11 @@ def measure(case: Case, settings: dict[str, Any], use_stt: bool) -> dict[str, An
         row["reply_gap_ms"] = (
             round((after[0] - case.labels["true_end"]) * 1000, 1) if after else None
         )
+        row["text_cue"] = stt_text
+        if stt_text:  # the cost of the cue: a finished turn whose text "sounds unfinished"
+            from nexora_audio.streaming.text_cues import sounds_unfinished
+
+            row["end_text_unfinished"] = sounds_unfinished(r["end_text"])
     return row
 
 

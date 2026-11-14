@@ -15,8 +15,11 @@ Auth: ``Authorization: Bearer <API key>`` with the ``stream`` scope, or ``token=
 
 Client control messages (JSON text): ``{"type": "agent_speaking", "value": true}``,
 ``{"type": "agent_audio", "data": "<base64>"}`` (the agent audio just played to the caller,
-in the stream's input format: the echo reference), ``{"type": "flush"}``, ``{"type": "reset"}``,
-``{"type": "end"}``, ``{"type": "ping"}``.
+in the stream's input format: the echo reference), ``{"type": "transcript", "text": "..."}``
+(the caller's latest speech-to-text for the current turn: if it ends on a word no sentence
+can end on, such as "...of" or "um", the turn waits longer before ``end_of_turn``),
+``{"type": "flush"}``, ``{"type": "reset"}``, ``{"type": "end"}``, ``{"type": "ping"}``.
+In Relay mode the agent can send ``transcript`` on its socket; it is used, not forwarded.
 
 Echo: in Relay mode the agent audio the server forwards to the caller is used as the echo
 reference automatically; in Process mode send it with ``agent_audio``. With a reference,
@@ -56,6 +59,7 @@ from nexora_server.settings import Settings
 from nexora_server.streaming.manager import CapacityError, SessionManager, SessionSpec
 
 log = logging.getLogger("nexora.stream")
+MAX_TRANSCRIPT_CHARS = 4000  # only the last word is used
 router = APIRouter()
 
 
@@ -397,6 +401,16 @@ async def _control(run: _Run, text: str) -> tuple[str, dict[str, Any] | None]:
                 None, run.session.push_reference, ref, run.fmt
             )
         return "ok", None
+    if kind == "transcript":
+        text = msg.get("text")
+        if not isinstance(text, str) or len(text) > MAX_TRANSCRIPT_CHARS:
+            return "error", {
+                "type": "error",
+                "code": 4400,
+                "message": f"transcript.text must be text, at most {MAX_TRANSCRIPT_CHARS} chars",
+            }
+        run.session.push_transcript(text)
+        return "ok", None
     if kind == "ping":
         return "ok", {"type": "pong", "audio_seconds": round(run.audio_s, 3)}
     if kind in ("flush", "end", "reset"):
@@ -522,11 +536,17 @@ async def _relay_loop(
                     if ws.application_state == WebSocketState.CONNECTED:
                         await ws.send_bytes(msg)
                 else:
+                    forward = True
                     with contextlib.suppress(ValueError, TypeError, AttributeError):
                         data = json.loads(msg)
                         if data.get("type") == "agent_speaking":
                             run.session.set_agent_speaking(bool(data.get("value")))
-                    if ws.application_state == WebSocketState.CONNECTED:
+                        elif data.get("type") == "transcript":  # for Nexora, not the caller
+                            forward = False
+                            text = data.get("text")
+                            if isinstance(text, str) and len(text) <= MAX_TRANSCRIPT_CHARS:
+                                run.session.push_transcript(text)
+                    if forward and ws.application_state == WebSocketState.CONNECTED:
                         await ws.send_text(msg)
         except websockets.ConnectionClosed:
             pass

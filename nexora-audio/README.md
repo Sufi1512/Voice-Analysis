@@ -57,7 +57,10 @@ End of turn uses **Smart Turn v3.2** (Daily, BSD-2, bundled): at each pause it j
 the audio whether the caller sounds finished, and waits longer when they don't ("I'd like
 to book a flight to..."). `end_of_turn` carries `complete_probability`. Tune it with
 `TurnConfig` (`complete_silence_ms`, `incomplete_silence_ms`; `smart_turn=False` for the
-plain 700 ms rule). Lab results and limits: `docs/E5_SPEC.md`. Interruptions are still
+plain 700 ms rule). If you have the caller's transcript, pass it with
+`session.push_transcript(text)` (server: `{"type": "transcript", "text": ...}`): a turn whose
+text ends on a word no sentence can end on ("...a flight to", "um", Arabic "يعني") waits
+longer. Lab results and limits: `docs/E5_SPEC.md`, `docs/E5B_SPEC.md`. Interruptions are still
 rule based: a short "stop!" and a short "yeah" look the same.
 
 A complete reference bridge (client WS -> nexora -> agent WS, with JSON events and

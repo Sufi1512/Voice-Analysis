@@ -188,3 +188,63 @@ def test_smart_turn_model_judges_real_speech() -> None:
     assert hashlib.sha256(smart_turn.model_path().read_bytes()).hexdigest() == (
         "2bb026316b14a660486a75b1733cd3fbab8c2fd0314dc9af7be49f8cca967e4f"
     )
+
+
+class TestTranscriptCue:
+    """A transcript ending on a word no sentence ends on holds the turn (E5b)."""
+
+    CFG = TurnConfig(complete_silence_ms=300, incomplete_silence_ms=2000)
+
+    def run(self, text: str | None, *, cue: bool = True) -> float | None:
+        cfg = TurnConfig(complete_silence_ms=300, incomplete_silence_ms=2000, text_cue=cue)
+        t = TurnTracker(cfg, judge=lambda a, b: 0.95)  # the audio says "finished"
+        now, last_voice, eot = 0.0, None, None
+        for p, dur in [(0.9, 1600), (0.0, 3000)]:
+            for _ in range(round(dur / 32)):
+                if text is not None and now == 1600 + 96:  # STT text ~100 ms into the pause
+                    t.set_transcript(text)
+                for e in t.update(now, p):
+                    if e.type == "speech_end":
+                        last_voice = e.time_ms
+                    if e.type == "end_of_turn":
+                        eot = e.time_ms
+                now += 32
+        return None if eot is None or last_voice is None else eot - last_voice
+
+    def test_unfinished_text_waits_even_if_audio_sounds_finished(self) -> None:
+        assert self.run("I want to book a flight to.") == pytest.approx(2016, abs=40)
+        assert self.run("أريد أن أحجز رحلة إلى") == pytest.approx(2016, abs=40)
+
+    def test_other_text_changes_nothing(self) -> None:
+        assert self.run("Yes, I can.") == pytest.approx(320, abs=40)
+        assert self.run(None) == pytest.approx(320, abs=40)
+
+    def test_cue_can_be_turned_off(self) -> None:
+        assert self.run("and then um", cue=False) == pytest.approx(320, abs=40)
+
+    def test_text_for_no_open_turn_is_ignored(self) -> None:
+        t = TurnTracker(self.CFG)
+        t.set_transcript("and")  # a late final for a turn that already ended
+        assert not t._text_unfinished
+
+    def test_new_turn_clears_the_cue(self) -> None:
+        t = TurnTracker(self.CFG, judge=lambda a, b: 0.95)
+        now, eots = 0.0, []
+        for p, dur in [(0.9, 800), (0.0, 2500), (0.9, 800), (0.0, 600)]:
+            for _ in range(round(dur / 32)):
+                if now == 832:
+                    t.set_transcript("because")
+                eots += [e for e in t.update(now, p) if e.type == "end_of_turn"]
+                now += 32
+        assert len(eots) == 2
+        assert eots[0].data["text_unfinished"] and "text_unfinished" not in eots[1].data
+
+
+def test_text_cue_words() -> None:
+    from nexora_audio.streaming.text_cues import last_word, sounds_unfinished
+
+    assert last_word(' "A lot of..." ') == "of"
+    for text in ["a lot of", "ten years ago they", "and", "um.", "يعني", "في"]:
+        assert sounds_unfinished(text), text
+    for text in ["", "Yes, I can.", "what for?", "come in", "hmm", "بس", "thank you"]:
+        assert not sounds_unfinished(text), text

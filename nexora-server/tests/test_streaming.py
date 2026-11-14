@@ -221,7 +221,8 @@ def test_session_pool_reuses_warm_sessions(client: Any) -> None:
 class FakeAgent:
     """A customer's agent platform: records what it gets, replies with 'TTS' audio."""
 
-    def __init__(self) -> None:
+    def __init__(self, transcript: str | None = None) -> None:
+        self.transcript = transcript  # sent back at every speech_end, like an STT final
         self.audio = bytearray()
         self.events: list[dict[str, Any]] = []
         self.port = 0
@@ -254,6 +255,8 @@ class FakeAgent:
                 else:
                     ev = json.loads(msg)
                     self.events.append(ev)
+                    if ev["type"] == "speech_end" and self.transcript is not None:
+                        await ws.send(json.dumps({"type": "transcript", "text": self.transcript}))
                     if ev["type"] == "end_of_turn":
                         await ws.send(b"\x01\x00" * 3200)  # 200 ms of agent audio
                         await ws.send(json.dumps({"type": "agent_reply", "text": "hello"}))
@@ -344,3 +347,53 @@ def test_agent_audio_must_be_base64(client: Any) -> None:
         ws.send_text(json.dumps({"type": "agent_audio", "data": "not base64!"}))
         err = ws.receive_json()
     assert err["type"] == "error" and "base64" in err["message"]
+
+
+def test_transcript_ending_mid_sentence_holds_the_turn(client: Any) -> None:
+    """Process mode: "...a flight to" keeps the turn open through a 1.5 s pause."""
+    _, key = new_org(client)
+    audio = speech_pcm16(pad_s=0.0) + bytes(2 * 16000 * 3 // 2)
+    speech_bytes = len(audio) - 2 * 16000 * 3 // 2
+    with client.websocket_connect("/v1/stream", headers=bearer(key)) as ws:
+        ws.receive_json()
+        cs = chunks(audio)
+        n_speech = speech_bytes // len(cs[0])
+        for c in cs[:n_speech]:
+            ws.send_bytes(c)
+        ws.send_text(json.dumps({"type": "transcript", "text": "I want to book a flight to"}))
+        for c in cs[n_speech:]:
+            ws.send_bytes(c)
+        ws.send_text(json.dumps({"type": "end"}))
+        msgs, _, code = drain(ws)
+    assert code == 1000
+    eots = [m for m in msgs if m.get("type") == "end_of_turn"]
+    assert eots and eots[-1].get("text_unfinished") is True and eots[-1].get("stream_end")
+
+
+def test_transcript_must_be_text(client: Any) -> None:
+    _, key = new_org(client)
+    with client.websocket_connect("/v1/stream", headers=bearer(key)) as ws:
+        ws.receive_json()
+        ws.send_text(json.dumps({"type": "transcript", "text": 42}))
+        err = ws.receive_json()
+    assert err["type"] == "error" and "transcript" in err["message"]
+
+
+def test_relay_agent_transcript_is_used_not_forwarded(client: Any) -> None:
+    import time
+
+    _, key = new_org(client, relay_allowlist=["127.0.0.1"])
+    audio = speech_pcm16(pad_s=0.5)
+    with FakeAgent(transcript="and then um") as agent:
+        target = f"ws://127.0.0.1:{agent.port}/agent"
+        with client.websocket_connect(f"/v1/relay?target={target}", headers=bearer(key)) as ws:
+            ws.receive_json()
+            for c in chunks(audio):
+                ws.send_bytes(c)
+            time.sleep(1.0)
+            ws.send_text(json.dumps({"type": "end"}))
+            msgs, _, code = drain(ws)
+    assert code == 1000
+    assert not any(m.get("type") == "transcript" for m in msgs)  # not sent to the caller
+    eots = [e for e in agent.events if e["type"] == "end_of_turn"]
+    assert eots and eots[-1].get("text_unfinished") is True

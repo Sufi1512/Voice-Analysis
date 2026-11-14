@@ -7,7 +7,9 @@ packet-loss concealment, Opus input, per-call quality numbers. E4 (echo) done on
 (`E4_SPEC.md`): no more false interruptions from echo in the lab. E3 (noise) partly done on
 2026-11-14 (`E3_SPEC.md`): background talkers removed in pauses. E5 (turn-taking) partly done
 on 2026-11-14 (`E5_SPEC.md`): Smart Turn end-of-turn; cut-offs inside unfinished sentences
-71% → 14% in the lab, target 3% not met yet (needs STT text and real calls).
+71% → 14% in the lab, target 3% not met yet. E5b (`E5B_SPEC.md`): the caller's transcript
+as a second cue; free in the lab but no extra gain over Smart Turn on English read speech.
+Needs real calls (and Arabic) to go further.
 
 2026-11-13. Covers noise, echo, cutting, turn-taking and network problems in nexora-audio, Voice Cloud and the Dograh integration.
 

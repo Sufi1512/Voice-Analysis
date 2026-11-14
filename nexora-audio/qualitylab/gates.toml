@@ -179,6 +179,17 @@ tolerance = 10.0
 phase = "E5"
 
 [[gate]]
+id = "text_hold"
+title = "Finished turns held 2 s because the transcript ends on an unfinished word (%)"
+metric = "end_text_unfinished"
+sets = ["turns"]
+agg = "pct_true"
+op = "<="
+threshold = 10.0
+tolerance = 10.0
+phase = "E5"
+
+[[gate]]
 id = "reply_gap"
 enforce = true
 title = "Reply gap: end of speech to end-of-turn event, median (ms)"
