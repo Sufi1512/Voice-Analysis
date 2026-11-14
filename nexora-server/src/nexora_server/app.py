@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -20,11 +21,27 @@ from nexora_server.db import Database
 from nexora_server.limits import LocalOrgLimiter, OrgLimiter, RedisOrgLimiter
 from nexora_server.observability import Metrics, setup_logging
 from nexora_server.settings import Settings
+from nexora_server.sso import OidcProvider
+from nexora_server.sso import router as sso_router
 from nexora_server.streaming.manager import SessionManager, SessionSpec
 from nexora_server.streaming.ws import router as ws_router
 
 log = logging.getLogger("nexora.app")
 DEFAULT_SPEC = SessionSpec.build(AudioFormat("pcm16", 16000), None, {}, {})
+
+
+async def _billing_loop(app: FastAPI) -> None:
+    """Report closed hours of usage to Stripe every NEXORA_BILLING_INTERVAL_S seconds."""
+    from nexora_server.billing import report_usage
+
+    while True:
+        try:
+            res = await run_in_threadpool(report_usage, app.state.db, app.state.meter)
+            if res.sent or res.failed:
+                log.info("billing", extra={"sent": res.sent, "failed": res.failed})
+        except Exception:
+            log.exception("billing run failed")
+        await asyncio.sleep(app.state.settings.billing_interval_s)
 
 
 def create_app(settings: Settings | None = None, *, prewarm: bool = True) -> FastAPI:
@@ -37,6 +54,9 @@ def create_app(settings: Settings | None = None, *, prewarm: bool = True) -> Fas
             from nexora_server.migrate import upgrade
 
             await run_in_threadpool(upgrade, settings.database_url)
+        billing_task = None
+        if settings.stripe_api_key:
+            billing_task = asyncio.create_task(_billing_loop(app))
         if prewarm:  # load models before taking traffic; readiness waits for this
             await run_in_threadpool(app.state.manager.prewarm, DEFAULT_SPEC)
         app.state.ready = True
@@ -44,6 +64,8 @@ def create_app(settings: Settings | None = None, *, prewarm: bool = True) -> Fas
             "ready", extra={"capacity": settings.max_sessions, "mode": settings.deployment_mode}
         )
         yield
+        if billing_task is not None:
+            billing_task.cancel()
         app.state.ready = False
         app.state.manager.shutdown()
 
@@ -84,6 +106,13 @@ def create_app(settings: Settings | None = None, *, prewarm: bool = True) -> Fas
     app.include_router(api_router)
     app.include_router(ws_router)
     app.include_router(dashboard_router)
+    app.include_router(sso_router)
+    app.state.oidc = OidcProvider(settings) if settings.oidc_issuer else None
+    app.state.meter = None
+    if settings.stripe_api_key:
+        from nexora_server.billing import StripeMeter
+
+        app.state.meter = StripeMeter(settings.stripe_api_key, settings.stripe_meter_event)
 
     @app.get("/healthz", tags=["ops"])
     def healthz() -> dict[str, str]:

@@ -130,7 +130,7 @@ async function loadOrgs() {
   };
 }
 
-const VIEWS = { overview, keys, profiles, sessions, audit, orgs };
+const VIEWS = { overview, keys, profiles, sessions, team, billing, audit, orgs };
 
 async function render() {
   if (!state.me) return;
@@ -436,7 +436,7 @@ async function sessions() {
   return h(
     "div",
     {},
-    h("h1", {}, "Recent sessions"),
+    h("div", { class: "row" }, h("h1", {}, "Recent sessions"), exportButtons("/v1/sessions/export", "sessions")),
     h("div", { class: "card" }, list.length ? h("table", {}, h("thead", {}, h("tr", {}, ["Started", "Mode", "Duration", "Status", "SNR dB", "Lost audio %", "Clipped %", "Turns", "Engine"].map((t) => h("th", {}, t)))), h("tbody", {}, list.map((s) => h(
       "tr",
       {},
@@ -453,6 +453,102 @@ async function sessions() {
   );
 }
 
+// ---- exports ---------------------------------------------------------------------------
+
+async function download(path, filename) {
+  const headers = {};
+  const key = sessionStorage.getItem(KEY_STORE);
+  if (key) headers.Authorization = `Bearer ${key}`;
+  else headers["X-Nexora-CSRF"] = "1";
+  const url = new URL(path, location.origin);
+  if (state.me?.superadmin && state.org) url.searchParams.set("org_id", state.org);
+  const res = await fetch(url, { headers, credentials: "same-origin" });
+  if (!res.ok) throw new ApiError(res.status, `export failed (${res.status})`);
+  const blobUrl = URL.createObjectURL(await res.blob());
+  const a = h("a", { href: blobUrl, download: filename });
+  document.body.append(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
+}
+
+function exportButtons(path, name) {
+  const today = new Date().toISOString().slice(0, 10);
+  return h(
+    "div",
+    {},
+    h("button", { class: "secondary", onclick: () => download(`${path}?format=csv`, `${name}-${today}.csv`) }, "Export CSV"),
+    " ",
+    h("button", { class: "secondary", onclick: () => download(`${path}?format=jsonl`, `${name}-${today}.jsonl`) }, "Export JSON Lines"),
+  );
+}
+
+// ---- team (single sign-on members) -----------------------------------------------------
+
+async function team() {
+  const [members, sso] = await Promise.all([
+    api("GET", "/v1/sso/members"),
+    fetch("/auth/oidc/status").then((r) => r.json()).catch(() => ({ enabled: false })),
+  ]);
+  const email = h("input", { type: "text", placeholder: "name@company.com", "aria-label": "Email" });
+  const role = h("select", { "aria-label": "Role" }, h("option", { value: "admin" }, "admin"), h("option", { value: "viewer" }, "viewer (usage only)"));
+  const err = h("p", { class: "error", role: "alert" });
+  const add = async () => {
+    try {
+      await api("POST", "/v1/sso/members", withOrg({ email: email.value, role: role.value }));
+      render();
+    } catch (ex) {
+      err.textContent = ex.message;
+    }
+  };
+  return h(
+    "div",
+    {},
+    h("h1", {}, "Team"),
+    h("p", { class: "muted" }, sso.enabled ? "People listed here can sign in to this dashboard with your company's single sign-on." : "Single sign-on is not configured on this server; members are kept for when it is."),
+    h("div", { class: "card" }, h("div", { class: "row" }, email, role, h("button", { onclick: add }, "Add")), err),
+    h("div", { class: "card" }, members.length ? h("table", {}, h("thead", {}, h("tr", {}, ["Email", "Role", "Added", "Last sign-in", ""].map((t) => h("th", {}, t)))), h("tbody", {}, members.map((m) => h(
+      "tr",
+      {},
+      h("td", {}, m.email),
+      h("td", {}, m.role),
+      h("td", {}, fmtDate(m.created_at)),
+      h("td", {}, m.last_login_at ? fmtDate(m.last_login_at) : h("span", { class: "muted" }, "never")),
+      h("td", {}, h("button", { class: "danger", onclick: () => removeMember(m) }, "Remove")),
+    )))) : h("p", { class: "muted" }, "No members yet.")),
+  );
+}
+
+function removeMember(m) {
+  const d = dialog(`Remove ${m.email}?`, h("p", {}, "They are signed out at once."), [
+    h("button", { class: "secondary", value: "cancel" }, "Cancel"),
+    h("button", { class: "danger", onclick: async (e) => { e.preventDefault(); await api("DELETE", `/v1/sso/members/${m.id}`); d.close(); render(); } }, "Remove"),
+  ]);
+}
+
+// ---- billing ---------------------------------------------------------------------------
+
+async function billing() {
+  const reports = await api("GET", "/v1/billing/reports");
+  const total = reports.filter((r) => r.status === "sent").reduce((a, r) => a + r.reported_seconds, 0);
+  return h(
+    "div",
+    {},
+    h("h1", {}, "Billing"),
+    h("p", { class: "muted" }, "Audio is reported to billing each hour, in whole seconds, when calls end."),
+    h("div", { class: "tiles" }, tile(fmtMin(total / 60), "minutes reported (listed hours)"), tile(String(reports.filter((r) => r.status === "failed").length), "hours waiting to retry")),
+    h("div", { class: "card" }, reports.length ? h("table", {}, h("thead", {}, h("tr", {}, ["Hour (UTC)", "Recorded s", "Reported s", "Status", "Sent"].map((t) => h("th", {}, t)))), h("tbody", {}, reports.map((r) => h(
+      "tr",
+      {},
+      h("td", {}, String(r.period_start).replace("T", " ").slice(0, 16)),
+      h("td", {}, r.audio_seconds.toFixed(1)),
+      h("td", {}, String(r.reported_seconds)),
+      h("td", {}, h("span", { class: `pill ${r.status === "sent" ? "good" : "bad"}` }, r.status), r.error ? h("span", { class: "muted" }, ` ${r.error}`) : null),
+      h("td", {}, fmtDate(r.sent_at)),
+    )))) : h("p", { class: "muted" }, "Nothing reported yet (billing is off, or no calls have ended).")),
+  );
+}
+
 // ---- audit -----------------------------------------------------------------------------
 
 async function audit() {
@@ -460,7 +556,7 @@ async function audit() {
   return h(
     "div",
     {},
-    h("h1", {}, "Audit log"),
+    h("div", { class: "row" }, h("h1", {}, "Audit log"), exportButtons("/v1/audit/export", "audit")),
     h("div", { class: "card" }, h("table", {}, h("thead", {}, h("tr", {}, ["When", "Who", "Action", "Details"].map((t) => h("th", {}, t)))), h("tbody", {}, list.map((a) => h("tr", {}, h("td", {}, fmtDate(a.at)), h("td", { class: "mono" }, a.actor), h("td", {}, a.action), h("td", { class: "mono" }, JSON.stringify(a.details))))))),
   );
 }

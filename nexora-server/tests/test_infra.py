@@ -221,19 +221,37 @@ def test_migrations_match_the_models(tmp_path: Path) -> None:
     assert "organizations" in _tables(url)
 
 
-def test_old_create_all_database_is_stamped(tmp_path: Path) -> None:
-    from nexora_server.db import Database
-    from nexora_server.migrate import upgrade
+def _version(url: str) -> str:
+    from sqlalchemy import text
 
-    url = f"sqlite:///{tmp_path / 'old.db'}"
-    Database(url).create_all()
-    upgrade(url)  # must not try to create the tables again
     eng = create_engine(url)
     with eng.connect() as conn:
+        v = conn.execute(text("SELECT version_num FROM alembic_version")).scalar()
+    eng.dispose()
+    return str(v)
+
+
+def test_create_all_databases_are_stamped_not_recreated(tmp_path: Path) -> None:
+    from nexora_server.db import Base, Database, SsoMember, UsageReport
+    from nexora_server.migrate import upgrade
+
+    current = f"sqlite:///{tmp_path / 'current.db'}"
+    Database(current).create_all()
+    upgrade(current)  # must not try to create the tables again
+    assert _version(current) == "0002"
+
+    e1 = f"sqlite:///{tmp_path / 'e1.db'}"  # an E1-era database: only the first tables
+    eng = create_engine(e1)
+    skip = {SsoMember.__table__.name, UsageReport.__table__.name}
+    first = [t for t in Base.metadata.sorted_tables if t.name not in skip]
+    Base.metadata.create_all(eng, tables=first)
+    with eng.begin() as conn:
         from sqlalchemy import text
 
-        assert conn.execute(text("SELECT version_num FROM alembic_version")).scalar() == "0001"
+        conn.execute(text("ALTER TABLE organizations DROP COLUMN stripe_customer_id"))
     eng.dispose()
+    upgrade(e1)
+    assert _version(e1) == "0002" and {"usage_reports", "sso_members"} <= _tables(e1)
 
 
 def test_migrations_on_postgres() -> None:

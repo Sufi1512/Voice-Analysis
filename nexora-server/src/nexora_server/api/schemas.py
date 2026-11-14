@@ -24,6 +24,7 @@ class OrgUpdate(BaseModel):
     max_concurrent_sessions: int | None = Field(None, ge=1, le=100_000)
     monthly_minutes_quota: int | None = Field(None, ge=0)
     relay_allowlist: list[str] | None = None
+    stripe_customer_id: str | None = Field(None, pattern=r"^cus_[A-Za-z0-9]+$", max_length=64)
 
 
 class OrgOut(BaseModel):
@@ -34,6 +35,7 @@ class OrgOut(BaseModel):
     max_concurrent_sessions: int
     monthly_minutes_quota: int | None
     relay_allowlist: list[str]
+    stripe_customer_id: str | None = None
     created_at: datetime
 
 
@@ -158,3 +160,32 @@ class MeOut(BaseModel):
     org_id: str | None
     org_name: str | None
     scopes: list[str]
+
+
+class SsoMemberIn(BaseModel):
+    email: str = Field(min_length=3, max_length=320, pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+    role: Literal["admin", "viewer"] = "admin"
+    org_id: str | None = None  # super-admin only
+
+
+class SsoMemberOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    org_id: str
+    email: str
+    role: str
+    created_at: datetime
+    last_login_at: datetime | None
+
+
+class UsageReportOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    org_id: str
+    period_start: datetime
+    period_end: datetime
+    audio_seconds: float
+    reported_seconds: int
+    status: str
+    error: str | None
+    sent_at: datetime | None

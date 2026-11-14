@@ -65,7 +65,9 @@ def main() -> None:
     import uvicorn
 
     ap = argparse.ArgumentParser(prog="nexora-server")
-    ap.add_argument("command", nargs="?", choices=["serve", "migrate"], default="serve")
+    ap.add_argument(
+        "command", nargs="?", choices=["serve", "migrate", "billing-report"], default="serve"
+    )
     ap.add_argument("--host", default="0.0.0.0")
     ap.add_argument("--port", type=int, default=8080)
     ap.add_argument("--no-prewarm", action="store_true", help="skip loading models at startup")
@@ -80,6 +82,20 @@ def main() -> None:
         logging.basicConfig(level=logging.INFO)
         upgrade(settings.database_url)
         return
+
+    if args.command == "billing-report":  # one run, e.g. from a CronJob
+        from nexora_server.billing import StripeMeter, report_usage
+        from nexora_server.db import Database
+
+        logging.basicConfig(level=logging.INFO)
+        if not settings.stripe_api_key:
+            raise SystemExit("NEXORA_STRIPE_API_KEY is not set")
+        res = report_usage(
+            Database(settings.database_url),
+            StripeMeter(settings.stripe_api_key, settings.stripe_meter_event),
+        )
+        print(f"sent {res.sent}, failed {res.failed}, empty hours {res.empty}")
+        raise SystemExit(1 if res.failed else 0)
 
     from nexora_server.app import create_app
 

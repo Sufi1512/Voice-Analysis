@@ -59,7 +59,7 @@ class Principal:
 
     @property
     def is_superadmin(self) -> bool:
-        return self.actor == "superadmin"
+        return self.actor == "superadmin" or self.actor.startswith("superadmin:")
 
     def has(self, scope: str) -> bool:
         return self.is_superadmin or scope in self.scopes

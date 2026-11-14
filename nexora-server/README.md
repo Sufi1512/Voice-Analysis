@@ -36,6 +36,9 @@ Interactive API docs: `http://localhost:8080/docs`.
 | `NEXORA_REDIS_URL` | none | Redis for organization limits across instances (session leases). Without it limits are per instance |
 | `NEXORA_LEASE_TTL_S` | 30 | A crashed instance's sessions stop counting after this long |
 | `NEXORA_DRAIN_TIMEOUT_S` | 600 | On SIGTERM: stop taking calls, wait this long for open ones, then exit |
+| `NEXORA_STRIPE_API_KEY` | none | Metered billing to Stripe, hourly (`docs/E9_SPEC.md`) |
+| `NEXORA_OIDC_ISSUER`, `_CLIENT_ID`, `_CLIENT_SECRET`, `_REDIRECT_URL` | none | Dashboard single sign-on (OpenID Connect) |
+| `NEXORA_SSO_SUPERADMIN_EMAILS` | none | Comma-separated emails that sign in as super-admin |
 | `NEXORA_AUTO_MIGRATE` | true | Run database migrations at start-up. Set false when a migration job runs them (`nexora-server migrate`) |
 
 ## Onboard a customer

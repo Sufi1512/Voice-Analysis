@@ -45,6 +45,11 @@ def get_principal(
 ) -> Principal:
     key = bearer(request.headers.get("authorization"))
     if key is None:
+        from nexora_server.sso import principal_from_cookie
+
+        session = principal_from_cookie(request, db, settings)
+        if session is not None:
+            return session
         raise HTTPException(401, "missing bearer API key", headers={"WWW-Authenticate": "Bearer"})
     who = principal_from_key(key, db, settings)
     if who is None:

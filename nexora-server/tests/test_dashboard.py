@@ -291,6 +291,26 @@ def test_dashboard_in_a_real_browser(live: Any) -> None:
             b.shot(view)
             if view == "sessions":
                 assert "18.5" in b.js("document.body.innerText")  # per-call quality column
+        b.js("location.hash = '#/team'")
+        b.wait("document.querySelector('#view h1')?.textContent === 'Team'")
+        b.js("document.querySelector('#view input[type=text]').value = 'Ops@Acme.example'")
+        b.click("Add", "#view")
+        b.wait(b.row_has("ops@acme.example", "admin"))
+        b.js("location.hash = '#/billing'")
+        b.wait("document.querySelector('#view h1')?.textContent === 'Billing'")
+        b.shot("billing")
+
+        downloads = Path(tempfile.mkdtemp(prefix="nexora-dl-"))
+        b.call("Page.setDownloadBehavior", behavior="allow", downloadPath=str(downloads))
+        b.js("location.hash = '#/audit'")
+        b.wait("document.querySelector('#view h1')?.textContent === 'Audit log'")
+        b.click("Export CSV", "#view")
+        deadline = time.time() + 10
+        while not list(downloads.glob("audit-*.csv")) and time.time() < deadline:
+            time.sleep(0.1)
+        (csv_file,) = list(downloads.glob("audit-*.csv"))
+        assert "sso.member.add" in csv_file.read_text() and "key.revoke" in csv_file.read_text()
+
         b.js("document.querySelector('#signout').click()")
         b.wait("!document.querySelector('#signin').hidden")
         assert b.js("sessionStorage.length") == 0

@@ -42,6 +42,20 @@ class Settings(BaseModel):
     auto_migrate: bool = Field(
         True, description="Run database migrations at start-up (false with a migration Job)."
     )
+    # single sign-on for the dashboard (OpenID Connect); empty issuer: off
+    oidc_issuer: str = ""
+    oidc_client_id: str = ""
+    oidc_client_secret: str = ""
+    oidc_redirect_url: str = Field(
+        default="", description="https://<host>/auth/oidc/callback, as registered at the IdP."
+    )
+    sso_superadmin_emails: list[str] = Field(default_factory=list)
+    sso_session_ttl_s: int = Field(8 * 3600, ge=300, le=7 * 86400)
+    cookie_secure: bool = Field(True, description="Send cookies over HTTPS only.")
+    # metered billing (Stripe billing meters); empty key: off
+    stripe_api_key: str = ""
+    stripe_meter_event: str = "nexora_audio_seconds"
+    billing_interval_s: float = Field(300.0, ge=10)
     log_level: str = "INFO"
     cors_origins: list[str] = Field(default_factory=list)
 
@@ -59,7 +73,7 @@ class Settings(BaseModel):
                 data[name] = float(raw)
             elif ann is bool:
                 data[name] = raw.strip().lower() in ("1", "true", "yes", "on")
-            elif name == "cors_origins":
+            elif name in ("cors_origins", "sso_superadmin_emails"):
                 data[name] = [o.strip() for o in raw.split(",") if o.strip()]
             else:
                 data[name] = raw

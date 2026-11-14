@@ -2,14 +2,29 @@
 
 from __future__ import annotations
 
+import csv
+import io
+import json
+from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from nexora_server.api import schemas as s
-from nexora_server.db import ApiKey, AuditEvent, Organization, Profile, SessionRecord, utcnow
+from nexora_server.db import (
+    ApiKey,
+    AuditEvent,
+    Organization,
+    Profile,
+    SessionRecord,
+    SsoMember,
+    UsageReport,
+    utcnow,
+)
 from nexora_server.deps import (
     get_db,
     get_principal,
@@ -283,16 +298,6 @@ def list_sessions(
     return list(db.scalars(q.order_by(SessionRecord.started_at.desc()).limit(limit)))
 
 
-@router.get("/sessions/{session_id}", response_model=s.SessionOut, tags=["sessions"])
-def get_session(
-    session_id: str, who: Principal = Depends(require("usage:read")), db: Session = Depends(get_db)
-) -> SessionRecord:
-    rec = db.get(SessionRecord, session_id)
-    if rec is None or (not who.is_superadmin and rec.org_id != who.org_id):
-        raise HTTPException(404, "session not found")
-    return rec
-
-
 @router.get("/usage", response_model=s.UsageOut, tags=["usage"])
 def get_usage(
     org_id: str | None = None,
@@ -331,3 +336,185 @@ def list_audit(
     oid = org_for(who, org_id)
     q = select(AuditEvent).where(AuditEvent.org_id == oid).order_by(AuditEvent.at.desc())
     return list(db.scalars(q.limit(limit)))
+
+
+# ---- single sign-on members -----------------------------------------------------------------
+
+
+@router.get("/sso/members", response_model=list[s.SsoMemberOut], tags=["sso"])
+def list_sso_members(
+    org_id: str | None = None,
+    who: Principal = Depends(require("admin")),
+    db: Session = Depends(get_db),
+) -> list[SsoMember]:
+    oid = org_for(who, org_id)
+    return list(
+        db.scalars(select(SsoMember).where(SsoMember.org_id == oid).order_by(SsoMember.email))
+    )
+
+
+@router.post("/sso/members", response_model=s.SsoMemberOut, status_code=201, tags=["sso"])
+def add_sso_member(
+    body: s.SsoMemberIn, who: Principal = Depends(require("admin")), db: Session = Depends(get_db)
+) -> SsoMember:
+    oid = org_for(who, body.org_id)
+    email = body.email.strip().lower()
+    if db.scalar(select(SsoMember).where(SsoMember.org_id == oid, SsoMember.email == email)):
+        raise HTTPException(409, f"{email} is already a member")
+    m = SsoMember(org_id=oid, email=email, role=body.role)
+    db.add(m)
+    db.flush()
+    audit(db, who, "sso.member.add", oid, email=email, role=body.role)
+    return m
+
+
+@router.delete("/sso/members/{member_id}", status_code=204, tags=["sso"])
+def remove_sso_member(
+    member_id: str, who: Principal = Depends(require("admin")), db: Session = Depends(get_db)
+) -> None:
+    m = db.get(SsoMember, member_id)
+    if m is None or (not who.is_superadmin and m.org_id != who.org_id):
+        raise HTTPException(404, "member not found")
+    audit(db, who, "sso.member.remove", m.org_id, email=m.email)
+    db.delete(m)
+
+
+# ---- billing --------------------------------------------------------------------------------
+
+
+@router.get("/billing/reports", response_model=list[s.UsageReportOut], tags=["billing"])
+def list_billing_reports(
+    org_id: str | None = None,
+    limit: int = Query(200, ge=1, le=5000),
+    who: Principal = Depends(require("admin")),
+    db: Session = Depends(get_db),
+) -> list[UsageReport]:
+    oid = org_for(who, org_id)
+    q = select(UsageReport).where(UsageReport.org_id == oid, UsageReport.status != "empty")
+    return list(db.scalars(q.order_by(UsageReport.period_start.desc()).limit(limit)))
+
+
+# ---- exports (CSV / JSON Lines) ---------------------------------------------------------------
+
+
+def _range(start: datetime | None, end: datetime | None) -> tuple[datetime, datetime]:
+    end = (end or utcnow()).astimezone(UTC)
+    start = (start or end - timedelta(days=31)).astimezone(UTC)
+    if end - start > timedelta(days=400):
+        raise HTTPException(422, "export at most 400 days at a time")
+    return start, end
+
+
+def _stream(
+    rows: Iterator[dict[str, Any]], fmt: str, name: str, fields: list[str]
+) -> StreamingResponse:
+    def gen() -> Iterator[str]:
+        if fmt == "csv":
+            buf = io.StringIO()
+            w = csv.DictWriter(buf, fieldnames=fields, extrasaction="ignore")
+            w.writeheader()
+            for r in rows:
+                w.writerow({k: _cell(r.get(k)) for k in fields})
+                yield buf.getvalue()
+                buf.seek(0)
+                buf.truncate()
+            yield buf.getvalue()
+        else:
+            for r in rows:
+                yield json.dumps(r, default=str) + "\n"
+
+    media = "text/csv" if fmt == "csv" else "application/x-ndjson"
+    ext = "csv" if fmt == "csv" else "jsonl"
+    return StreamingResponse(
+        gen(),
+        media_type=media,
+        headers={"Content-Disposition": f'attachment; filename="{name}.{ext}"'},
+    )
+
+
+def _cell(v: Any) -> Any:
+    """CSV cell: JSON for structures; a leading ' stops spreadsheets running formulas."""
+    if isinstance(v, dict | list):
+        v = json.dumps(v, sort_keys=True)
+    if isinstance(v, datetime):
+        v = v.isoformat()
+    if isinstance(v, str) and v[:1] in ("=", "+", "-", "@", "\t", "\r"):
+        v = "'" + v
+    return v
+
+
+@router.get("/audit/export", tags=["audit"])
+def export_audit(
+    org_id: str | None = None,
+    start: datetime | None = None,
+    end: datetime | None = None,
+    format: Literal["csv", "jsonl"] = "csv",
+    who: Principal = Depends(require("admin")),
+    db: Session = Depends(get_db),
+) -> StreamingResponse:
+    oid = org_for(who, org_id)
+    a, b = _range(start, end)
+    items = list(
+        db.scalars(
+            select(AuditEvent)
+            .where(AuditEvent.org_id == oid, AuditEvent.at >= a, AuditEvent.at < b)
+            .order_by(AuditEvent.at)
+        )
+    )
+    rows = (
+        {"id": e.id, "at": e.at, "actor": e.actor, "action": e.action, "details": e.details}
+        for e in items
+    )
+    audit(db, who, "audit.export", oid, start=a.isoformat(), end=b.isoformat(), rows=len(items))
+    return _stream(rows, format, f"audit-{oid}", ["id", "at", "actor", "action", "details"])
+
+
+SESSION_FIELDS = [
+    "id",
+    "started_at",
+    "ended_at",
+    "mode",
+    "status",
+    "audio_seconds",
+    "profile_id",
+    "api_key_id",
+    "close_code",
+    "close_reason",
+    "event_counts",
+    "quality",
+]
+
+
+@router.get("/sessions/export", tags=["sessions"])
+def export_sessions(
+    org_id: str | None = None,
+    start: datetime | None = None,
+    end: datetime | None = None,
+    format: Literal["csv", "jsonl"] = "csv",
+    who: Principal = Depends(require("usage:read")),
+    db: Session = Depends(get_db),
+) -> StreamingResponse:
+    """Every session (call) in the range by start time, for usage reconciliation."""
+    oid = org_for(who, org_id)
+    a, b = _range(start, end)
+    items = list(
+        db.scalars(
+            select(SessionRecord)
+            .where(SessionRecord.org_id == oid, SessionRecord.started_at >= a)
+            .where(SessionRecord.started_at < b)
+            .order_by(SessionRecord.started_at)
+        )
+    )
+    rows = ({k: getattr(r, k) for k in SESSION_FIELDS} for r in items)
+    return _stream(rows, format, f"sessions-{oid}", SESSION_FIELDS)
+
+
+# registered last: "/sessions/export" must be matched before "/sessions/{session_id}"
+@router.get("/sessions/{session_id}", response_model=s.SessionOut, tags=["sessions"])
+def get_session(
+    session_id: str, who: Principal = Depends(require("usage:read")), db: Session = Depends(get_db)
+) -> SessionRecord:
+    rec = db.get(SessionRecord, session_id)
+    if rec is None or (not who.is_superadmin and rec.org_id != who.org_id):
+        raise HTTPException(404, "session not found")
+    return rec

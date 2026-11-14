@@ -16,6 +16,7 @@ from sqlalchemy import (
     ForeignKey,
     Integer,
     String,
+    UniqueConstraint,
     create_engine,
     event,
 )
@@ -43,6 +44,8 @@ class Organization(Base):
     max_concurrent_sessions: Mapped[int] = mapped_column(Integer, default=10)
     monthly_minutes_quota: Mapped[int | None] = mapped_column(Integer, nullable=True)
     relay_allowlist: Mapped[list[str]] = mapped_column(JSON, default=list)
+    # Stripe customer whose metered subscription is billed for this organization's audio
+    stripe_customer_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
@@ -104,6 +107,37 @@ class AuditEvent(Base):
     action: Mapped[str] = mapped_column(String(64))
     details: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+
+
+class UsageReport(Base):
+    """One hour of one organization's audio, reported to the billing provider once."""
+
+    __tablename__ = "usage_reports"
+    __table_args__ = (UniqueConstraint("org_id", "period_start", name="uq_usage_report_hour"),)
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=lambda: new_id("use"))
+    org_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True)
+    period_start: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    period_end: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    audio_seconds: Mapped[float] = mapped_column(Float)  # recorded in this hour
+    reported_seconds: Mapped[int] = mapped_column(Integer)  # sent (rounding carried over)
+    identifier: Mapped[str] = mapped_column(String(128), unique=True)  # provider idempotency
+    status: Mapped[str] = mapped_column(String(16), default="pending")  # pending|sent|failed
+    error: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class SsoMember(Base):
+    """An email address allowed to sign in to an organization's dashboard with SSO."""
+
+    __tablename__ = "sso_members"
+    __table_args__ = (UniqueConstraint("org_id", "email", name="uq_sso_member"),)
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=lambda: new_id("mem"))
+    org_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True)
+    email: Mapped[str] = mapped_column(String(320), index=True)  # lower-case
+    role: Mapped[str] = mapped_column(String(16), default="admin")  # admin | viewer
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class Database:
