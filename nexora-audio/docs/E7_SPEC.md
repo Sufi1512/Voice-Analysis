@@ -58,3 +58,11 @@ on Apple Silicon (I-031), Windows (not attempted).
   darwin-aarch64 (counts in the table above).
 - `wheels` run 43583904866: all four platform wheels built, installed into a clean
   virtualenv and tested.
+
+## macOS paused (2026-11-14)
+
+NEXORA is integrated into Python services on Linux, so the macOS builds were taken out of
+CI (`native-libs.yml`, `wheels.yml`). Before that, the bug round fixed DeepFilterNet on Apple
+Silicon (I-031: tract's AMX instructions, now opt-in through a build patch) and the arm64 macOS
+wheel passed its tests with it. `native/build_native.sh` still builds on macOS; add the
+`macos-15` / `macos-15-intel` matrix rows back to resume.
