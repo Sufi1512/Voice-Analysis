@@ -27,6 +27,13 @@ through each telephony provider, real speakerphone echo recordings, Arabic and o
 launch languages, real music. Synthetic English and Arabic calls (above) stand in for some
 of this, with the limits in `docs/E5B_SPEC.md`.
 
+**E11 spike** (`spikes/e11_speaker_gate.py`, in `qualitylab/.cache/e11/`, never committed):
+3D-Speaker ERes2Net VoxCeleb speaker-embedding model (Apache-2.0; sherpa-onnx release
+`speaker-recongition-models`, sha256 `c5915837...db5`), WeSpeaker ResNet34 VoxCeleb (code
+Apache-2.0, weights follow VoxCeleb CC-BY-4.0; sha256 `5ef208a9...fe94`), and two more Piper
+voices for single-speaker test audio: `en_US-ryan-medium` (data CC BY-NC-SA 4.0: research
+only) and `en_GB-alan-medium` (data licence "see URL": research only).
+
 **Frozen transcripts** (`turn_transcripts.json`): Whisper tiny.en's text of the speech before
 each pause in the turn cases, generated once and committed, because Whisper's output differs
 slightly between CPU models and the text cue would otherwise change the turn results from

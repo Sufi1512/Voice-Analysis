@@ -11,6 +11,8 @@ on 2026-11-14 (`E5_SPEC.md`): Smart Turn end-of-turn; cut-offs inside unfinished
 as a second cue; free in the lab but no extra gain over Smart Turn on English read speech.
 Needs real calls (and Arabic) to go further. E5c: synthetic EN/AR calls; with the text cue
 mid-sentence cut-offs EN 18%, AR 5%; Arabic replies slow (1.9 s), open issue I-013.
+E11 (2026-11-14, `E11_REPORT.md`): background voices as loud as the caller: a speaker-embedding
+gate was measured and rejected; removing them needs a trained personalised model.
 
 2026-11-13. Covers noise, echo, cutting, turn-taking and network problems in nexora-audio, Voice Cloud and the Dograh integration.
 
