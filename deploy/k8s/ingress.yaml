@@ -1,0 +1,28 @@
+# ingress-nginx; calls are long-lived WebSockets, so allow up to an hour without traffic gaps
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: nexora-server
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-body-size: 16m
+    # per client IP, before traffic reaches the pods (the app limits per IP again);
+    # a WebSocket call is one request, so this caps new calls, not audio
+    nginx.ingress.kubernetes.io/limit-rps: "20"
+    nginx.ingress.kubernetes.io/limit-burst-multiplier: "5"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts: [voice.example.com]
+      secretName: nexora-tls
+  rules:
+    - host: voice.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: nexora-server
+                port: {name: http}

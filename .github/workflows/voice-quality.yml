@@ -39,7 +39,9 @@ jobs:
           python-version: "3.13"
           cache: pip
       - name: Install
-        run: pip install -e ".[dev,qualitylab]"
+        run: |
+          sudo apt-get install -y --no-install-recommends libopus0
+          pip install -e ".[dev,qualitylab,pipecat]"
       - name: Lint and unit tests
         run: |
           ruff check src tests qualitylab
@@ -54,9 +56,80 @@ jobs:
         run: python -m qualitylab fetch --stt
       - name: Quality gates (${{ env.PROFILE }})
         run: python -m qualitylab run --profile "$PROFILE"
+      - name: Turn cases on failure (diagnosis)
+        if: failure()
+        run: |
+          python - <<'EOF'
+          import json, glob
+          for f in glob.glob("qualitylab/out/results-*.json"):
+              for r in json.load(open(f))["rows"]:
+                  if r["set"] == "turns":
+                      print(r["id"], {k: r.get(k) for k in ("reply_gap_ms", "pauses_cut", "end_text_unfinished")})
+          EOF
       - name: Upload report
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: voice-quality-${{ env.PROFILE }}
+          path: nexora-audio/qualitylab/out/
+
+  # Synthetic English and Arabic calls (turns_tts, OPEN_ISSUES I-015): generated with offline
+  # Piper voices in their own environment (sherpa-onnx 1.12.40), cached, then the turn-taking
+  # gates with the regression check, plus a report with semantic transcript verdicts.
+  # The voices are research-licence only: the generated audio stays in the CI cache.
+  synthetic-calls:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      NEXORA_QL_CACHE: ${{ github.workspace }}/nexora-audio/qualitylab/.cache
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install
+        run: |
+          sudo apt-get install -y --no-install-recommends libopus0
+          pip install -e ".[dev,qualitylab]"
+      - name: Cache the generated calls
+        id: tts-cache
+        uses: actions/cache@v4
+        with:
+          path: nexora-audio/qualitylab/.cache/tts/turns
+          key: turns-tts-${{ hashFiles('nexora-audio/qualitylab/tts_gen.py', 'nexora-audio/qualitylab/tts_scripts.py') }}
+      - name: Generate the calls (pinned voices)
+        if: steps.tts-cache.outputs.cache-hit != 'true'
+        run: |
+          python -m venv "$RUNNER_TEMP/ttsenv"
+          "$RUNNER_TEMP/ttsenv/bin/pip" install -q "sherpa-onnx==1.12.40" numpy scipy
+          mkdir -p qualitylab/.cache/tts
+          base=https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models
+          while read -r sum name; do
+            curl -sSLf -o "$RUNNER_TEMP/$name.tar.bz2" "$base/$name.tar.bz2"
+            echo "$sum  $RUNNER_TEMP/$name.tar.bz2" | sha256sum -c -
+            tar xjf "$RUNNER_TEMP/$name.tar.bz2" -C qualitylab/.cache/tts
+          done <<'VOICES'
+          9e3febfacf0abf4270172d2958bcec246032b7e88efc2720840cc80c93de334e vits-piper-en_US-lessac-medium
+          9ebbcea30e0fbd588f7b2cb45ee897d6aeb1bf5791cbc037a7b5a3f641e3dbce vits-piper-ar_JO-kareem-medium
+          VOICES
+          "$RUNNER_TEMP/ttsenv/bin/python" -I qualitylab/tts_gen.py qualitylab/.cache/tts
+      - name: Cache test audio
+        uses: actions/cache@v4
+        with:
+          path: nexora-audio/qualitylab/.cache/MS-SNSD
+          key: mssnsd-${{ hashFiles('nexora-audio/qualitylab/sources.py') }}
+      - name: Fetch pinned test audio
+        run: python -m qualitylab fetch
+      - name: Turn-taking gates on the synthetic calls
+        run: python -m qualitylab run --profile full --only turns_tts --no-stt --out qualitylab/out/tts
+      - name: With semantic transcript verdicts (report)
+        run: |
+          python -m qualitylab run --profile full --only turns_tts --no-stt --no-baseline \
+            --set lab_transcript_hint=wrong20 --out qualitylab/out/tts-verdicts
+      - name: Upload reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: synthetic-calls
           path: nexora-audio/qualitylab/out/

@@ -43,6 +43,7 @@ op = "<="
 threshold = 0.5
 tolerance = 0.5
 phase = "E3"
+regress = false  # STT output varies with the CPU (int8 kernels): no cross-machine baseline
 
 [[gate]]
 id = "wer_noisy"
@@ -55,6 +56,7 @@ op = ">="
 threshold = 20.0
 tolerance = 3.0
 phase = "E3"
+regress = false  # STT output varies with the CPU (int8 kernels): no cross-machine baseline
 
 [[gate]]
 id = "pause_noise"
@@ -92,6 +94,17 @@ tolerance = 0.5
 phase = "E3"
 
 [[gate]]
+id = "pumping_added"
+title = "Level swing in pauses added by processing (output minus input spread), share of cases over 3 dB (%)"
+metric = "pumping_added_over3"
+sets = ["noise"]
+agg = "pct_true"
+op = "<="
+threshold = 5.0
+tolerance = 3.0
+phase = "E3"
+
+[[gate]]
 id = "erle"
 title = "Echo removed while only the agent talks, worst case (ERLE dB)"
 metric = "erle_db"
@@ -105,6 +118,7 @@ phase = "E4"
 
 [[gate]]
 id = "false_barge_echo"
+enforce = true
 title = "False barge-ins on echo-only audio (count)"
 metric = "false_barge_ins"
 sets = ["echo"]
@@ -144,10 +158,96 @@ id = "turn_cutoff"
 title = "Mid-sentence pauses taken as end of turn (%)"
 metric = "pauses_cut"
 sets = ["turns"]
+kind = "mid"
 agg = "pause_pct"
 op = "<="
 threshold = 3.0
 tolerance = 0
+phase = "E5"
+
+[[gate]]
+id = "clause_pause_cut"
+title = "Pauses after a clause, mid-sentence, taken as end of turn (%)"
+metric = "pauses_cut"
+sets = ["turns"]
+kind = "clause"
+agg = "pause_pct"
+op = "<="
+threshold = 20.0
+tolerance = 10.0
+phase = "E5"
+
+[[gate]]
+id = "sentence_pause_cut"
+title = "Pauses between two full sentences taken as end of turn (%)"
+metric = "pauses_cut"
+sets = ["turns"]
+kind = "sentence"
+agg = "pause_pct"
+op = "<="
+threshold = 50.0
+tolerance = 10.0
+phase = "E5"
+
+[[gate]]
+id = "text_hold"
+title = "Finished turns held 2 s because the transcript ends on an unfinished word (%)"
+metric = "end_text_unfinished"
+sets = ["turns"]
+agg = "pct_true"
+op = "<="
+threshold = 10.0
+tolerance = 10.0
+phase = "E5"
+
+[[gate]]
+id = "tts_cutoff_en"
+title = "Synthetic English calls: mid-sentence pauses taken as end of turn (%)"
+metric = "pauses_cut"
+sets = ["turns_tts"]
+kind = "mid"
+lang = "en"
+agg = "pause_pct"
+op = "<="
+threshold = 3.0
+tolerance = 10.0
+phase = "E5"
+
+[[gate]]
+id = "tts_reply_gap_en"
+title = "Synthetic English calls: reply gap after a finished turn, median (ms)"
+metric = "reply_gap_ms"
+sets = ["turns_tts"]
+lang = "en"
+agg = "median"
+op = "<="
+threshold = 800.0
+tolerance = 150.0
+phase = "E5"
+
+[[gate]]
+id = "tts_cutoff_ar"
+title = "Synthetic Arabic calls: mid-sentence pauses taken as end of turn (%)"
+metric = "pauses_cut"
+sets = ["turns_tts"]
+kind = "mid"
+lang = "ar"
+agg = "pause_pct"
+op = "<="
+threshold = 3.0
+tolerance = 10.0
+phase = "E5"
+
+[[gate]]
+id = "tts_reply_gap_ar"
+title = "Synthetic Arabic calls: reply gap after a finished turn, median (ms)"
+metric = "reply_gap_ms"
+sets = ["turns_tts"]
+lang = "ar"
+agg = "median"
+op = "<="
+threshold = 800.0
+tolerance = 150.0
 phase = "E5"
 
 [[gate]]

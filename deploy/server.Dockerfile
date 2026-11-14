@@ -10,7 +10,7 @@ WORKDIR /opt/nexora
 
 COPY nexora-audio /opt/nexora/nexora-audio
 COPY nexora-server /opt/nexora/nexora-server
-RUN pip install ./nexora-audio "./nexora-server[postgres]" \
+RUN pip install ./nexora-audio "./nexora-server[postgres,redis]" \
  && rm -rf /opt/nexora/nexora-audio/tests /opt/nexora/nexora-server/tests
 
 USER nexora

@@ -5,6 +5,8 @@ Supported encodings, all little-endian and interleaved:
 * ``pcm16``: signed 16-bit PCM, the usual format for WebRTC, browsers and STT/TTS APIs
 * ``float32``: 32-bit float in [-1, 1]
 * ``mulaw`` / ``alaw``: 8-bit G.711, used by telephony (Twilio, SIP), usually 8 kHz mono
+* ``opus``: input only; one Opus packet per ``decode`` call (one WebSocket message), an
+  empty payload for a lost packet. Needs the system ``libopus`` (see ``opus.py``).
 
 The G.711 code is a NumPy implementation of the ITU-T formulas, because
 ``audioop`` was removed from the standard library in Python 3.13.
@@ -13,15 +15,20 @@ The G.711 code is a NumPy implementation of the ITU-T formulas, because
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 import numpy as np
 
 from nexora_audio.exceptions import AudioFormatError
 from nexora_audio.utils.audio_utils import Float32Array
 
-Encoding = Literal["pcm16", "float32", "mulaw", "alaw"]
-_BYTES = {"pcm16": 2, "float32": 4, "mulaw": 1, "alaw": 1}
+if TYPE_CHECKING:
+    from nexora_audio.streaming.opus import OpusDecoder
+
+Encoding = Literal["pcm16", "float32", "mulaw", "alaw", "opus"]
+_BYTES = {"pcm16": 2, "float32": 4, "mulaw": 1, "alaw": 1, "opus": 0}
+# Smallest decoded magnitude of each codec's silence: A-law has no exact zero (0xD5 -> 8).
+SILENCE_LEVEL = {"pcm16": 0.0, "float32": 0.0, "mulaw": 0.0, "alaw": 8 / 32768, "opus": 0.0}
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,6 +46,13 @@ class AudioFormat:
             raise AudioFormatError("channels must be 1 or 2")
         if not 8000 <= self.sample_rate <= 192000:
             raise AudioFormatError(f"sample_rate {self.sample_rate} out of range")
+        if self.encoding == "opus" and self.sample_rate not in (8000, 12000, 16000, 24000, 48000):
+            raise AudioFormatError("Opus sample_rate must be 8000, 12000, 16000, 24000 or 48000")
+
+    @property
+    def packetized(self) -> bool:
+        """True for packet codecs (Opus): one message = one packet, not a byte stream."""
+        return self.encoding == "opus"
 
     @property
     def bytes_per_frame(self) -> int:
@@ -46,6 +60,8 @@ class AudioFormat:
         return _BYTES[self.encoding] * self.channels
 
     def bytes_for_ms(self, ms: float) -> int:
+        if self.packetized:
+            raise AudioFormatError("Opus is packet-based: it has no fixed bytes per millisecond")
         return round(self.sample_rate * ms / 1000.0) * self.bytes_per_frame
 
 
@@ -121,8 +137,15 @@ class StreamDecoder:
     def __init__(self, fmt: AudioFormat) -> None:
         self.format = fmt
         self._pending = b""
+        self._opus: OpusDecoder | None = None
+        if fmt.packetized:
+            from nexora_audio.streaming.opus import OpusDecoder
+
+            self._opus = OpusDecoder(fmt.sample_rate, fmt.channels)
 
     def decode(self, data: bytes) -> Float32Array:
+        if self._opus is not None:
+            return self._opus.decode(data)
         buf = self._pending + data
         usable = len(buf) - len(buf) % self.format.bytes_per_frame
         self._pending = buf[usable:]
@@ -142,10 +165,14 @@ class StreamDecoder:
 
     def reset(self) -> None:
         self._pending = b""
+        if self._opus is not None:
+            self._opus.reset()
 
 
 def encode(planar: Float32Array, fmt: AudioFormat) -> bytes:
     """Planar float32 to bytes in ``fmt`` (clipped to full scale)."""
+    if fmt.packetized:
+        raise AudioFormatError("Opus output is not supported: use pcm16, float32 or G.711")
     x = np.clip(planar.T.reshape(-1), -1.0, 1.0)
     if fmt.encoding == "float32":
         return x.astype("<f4").tobytes()

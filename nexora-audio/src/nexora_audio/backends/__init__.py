@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from nexora_audio.backends import deepfilternet, enhancer, rnnoise, silero
+from nexora_audio.backends import aec3, deepfilternet, enhancer, rnnoise, silero
 from nexora_audio.core.capabilities import BackendRegistry
 
 BUILTIN_SPECS = (
+    aec3.SPEC,
     deepfilternet.SPEC,
     rnnoise.SPEC,
     enhancer.ENHANCER_SPEC,

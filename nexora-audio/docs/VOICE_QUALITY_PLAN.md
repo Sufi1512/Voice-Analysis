@@ -2,7 +2,17 @@
 
 **Status 2026-11-13:** E2a (quality lab) done. The first baseline found DeepFilterNet3 cutting
 up to 78% of clean phone speech; fixed with the speech guard. Results and the current gate
-status: `QUALITY_BASELINE.md`. Next: E2 (Dograh integration, loss concealment).
+status: `QUALITY_BASELINE.md`. E2 done the same day (`E2_SPEC.md`): Dograh engine patch,
+packet-loss concealment, Opus input, per-call quality numbers. E4 (echo) done on 2026-11-14
+(`E4_SPEC.md`): no more false interruptions from echo in the lab. E3 (noise) partly done on
+2026-11-14 (`E3_SPEC.md`): background talkers removed in pauses. E5 (turn-taking) partly done
+on 2026-11-14 (`E5_SPEC.md`): Smart Turn end-of-turn; cut-offs inside unfinished sentences
+71% → 14% in the lab, target 3% not met yet. E5b (`E5B_SPEC.md`): the caller's transcript
+as a second cue; free in the lab but no extra gain over Smart Turn on English read speech.
+Needs real calls (and Arabic) to go further. E5c: synthetic EN/AR calls; with the text cue
+mid-sentence cut-offs EN 18%, AR 5%; Arabic replies slow (1.9 s), open issue I-013.
+E11 (2026-11-14, `E11_REPORT.md`): background voices as loud as the caller: a speaker-embedding
+gate was measured and rejected; removing them needs a trained personalised model.
 
 2026-11-13. Covers noise, echo, cutting, turn-taking and network problems in nexora-audio, Voice Cloud and the Dograh integration.
 

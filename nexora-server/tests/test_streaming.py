@@ -52,6 +52,37 @@ def test_process_mode_end_to_end_with_metering(client: Any) -> None:
     metrics = client.get("/metrics").text
     assert 'nexora_sessions_total{mode="process",outcome="ok"} 1.0' in metrics
     assert "nexora_audio_seconds_total" in metrics
+    assert "nexora_session_snr_db_count 1.0" in metrics
+
+    q = ended["quality"]  # per-call quality reported to the client and stored
+    assert q["snr_db"] > 10 and q["concealed_ms"] == 0 and q["latency_ms"] > 0
+    assert sessions[0]["quality"]["snr_db"] == q["snr_db"]
+
+
+def test_opus_input(client: Any) -> None:
+    from nexora_audio.streaming.opus import OpusEncoder, probe
+
+    if probe() is not None:
+        pytest.skip("libopus not installed")
+    import numpy as np
+
+    _, key = new_org(client)
+    pcm = np.frombuffer(speech_pcm16(pad_s=0.5), np.int16).astype(np.float32) / 32768
+    enc = OpusEncoder(16000)
+    packets = [enc.encode(pcm[None, i : i + 320]) for i in range(0, len(pcm) - 320, 320)]
+    with client.websocket_connect(
+        "/v1/stream?encoding=opus&sample_rate=16000", headers=bearer(key)
+    ) as ws:
+        started = ws.receive_json()
+        for p in packets:
+            ws.send_bytes(p)
+        ws.send_text(json.dumps({"type": "end"}))
+        msgs, out, code = drain(ws)
+    assert started["input_format"]["encoding"] == "opus" and code == 1000
+    assert len(out) >= len(packets) * 640  # PCM16 back
+    ended = msgs[-1]
+    assert ended["audio_seconds"] == pytest.approx(len(packets) * 0.02, abs=0.05)
+    assert "end_of_turn" in [m["type"] for m in msgs]
 
 
 def test_telephony_format_and_profile(client: Any) -> None:
@@ -190,7 +221,8 @@ def test_session_pool_reuses_warm_sessions(client: Any) -> None:
 class FakeAgent:
     """A customer's agent platform: records what it gets, replies with 'TTS' audio."""
 
-    def __init__(self) -> None:
+    def __init__(self, transcript: str | None = None) -> None:
+        self.transcript = transcript  # sent back at every speech_end, like an STT final
         self.audio = bytearray()
         self.events: list[dict[str, Any]] = []
         self.port = 0
@@ -223,6 +255,8 @@ class FakeAgent:
                 else:
                     ev = json.loads(msg)
                     self.events.append(ev)
+                    if ev["type"] == "speech_end" and self.transcript is not None:
+                        await ws.send(json.dumps({"type": "transcript", "text": self.transcript}))
                     if ev["type"] == "end_of_turn":
                         await ws.send(b"\x01\x00" * 3200)  # 200 ms of agent audio
                         await ws.send(json.dumps({"type": "agent_reply", "text": "hello"}))
@@ -270,3 +304,123 @@ def test_relay_unreachable_agent(client: Any) -> None:
         ws.receive_json()
         _msgs, _, close = drain(ws)
     assert close == 4502
+
+
+def test_agent_audio_reference_prevents_echo_barge_in(client: Any) -> None:
+    """The agent's own voice coming back (speakerphone echo) is not an interruption."""
+    import base64
+
+    import numpy as np
+
+    _, key = new_org(client)
+    agent = np.frombuffer(speech_pcm16(pad_s=0.0), np.int16).astype(np.float32)
+    delay = int(0.12 * 16000)  # 120 ms acoustic + network path
+    echo = 0.5 * np.concatenate([np.zeros(delay, np.float32), agent])[: len(agent)]
+    rng = np.random.default_rng(0)
+    mic = (echo + 30 * rng.standard_normal(len(agent))).astype(np.int16).tobytes()
+    ref = agent.astype(np.int16).tobytes()
+
+    def run(with_reference: bool) -> list[str]:
+        with client.websocket_connect("/v1/stream", headers=bearer(key)) as ws:
+            ws.receive_json()
+            if not with_reference:
+                ws.send_text(json.dumps({"type": "agent_speaking", "value": True}))
+            for i in range(0, len(mic), 640):
+                if with_reference:
+                    chunk = base64.b64encode(ref[i : i + 640]).decode()
+                    ws.send_text(json.dumps({"type": "agent_audio", "data": chunk}))
+                ws.send_bytes(mic[i : i + 640])
+            ws.send_text(json.dumps({"type": "end"}))
+            msgs, _, code = drain(ws)
+        assert code == 1000
+        return [m["type"] for m in msgs]
+
+    assert "interruption" in run(with_reference=False)  # the problem
+    types = run(with_reference=True)
+    assert "interruption" not in types and types[-1] == "session.ended"
+
+
+def test_agent_audio_must_be_base64(client: Any) -> None:
+    _, key = new_org(client)
+    with client.websocket_connect("/v1/stream", headers=bearer(key)) as ws:
+        ws.receive_json()
+        ws.send_text(json.dumps({"type": "agent_audio", "data": "not base64!"}))
+        err = ws.receive_json()
+    assert err["type"] == "error" and "base64" in err["message"]
+
+
+def test_transcript_ending_mid_sentence_holds_the_turn(client: Any) -> None:
+    """Process mode: "...a flight to" keeps the turn open through a 1.5 s pause."""
+    _, key = new_org(client)
+    audio = speech_pcm16(pad_s=0.0) + bytes(2 * 16000 * 3 // 2)
+    speech_bytes = len(audio) - 2 * 16000 * 3 // 2
+    with client.websocket_connect("/v1/stream", headers=bearer(key)) as ws:
+        ws.receive_json()
+        cs = chunks(audio)
+        n_speech = speech_bytes // len(cs[0])
+        for c in cs[:n_speech]:
+            ws.send_bytes(c)
+        ws.send_text(json.dumps({"type": "transcript", "text": "I want to book a flight to"}))
+        for c in cs[n_speech:]:
+            ws.send_bytes(c)
+        ws.send_text(json.dumps({"type": "end"}))
+        msgs, _, code = drain(ws)
+    assert code == 1000
+    eots = [m for m in msgs if m.get("type") == "end_of_turn"]
+    assert eots and eots[-1].get("text_unfinished") is True and eots[-1].get("stream_end")
+
+
+def test_transcript_must_be_text(client: Any) -> None:
+    _, key = new_org(client)
+    with client.websocket_connect("/v1/stream", headers=bearer(key)) as ws:
+        ws.receive_json()
+        ws.send_text(json.dumps({"type": "transcript", "text": 42}))
+        err = ws.receive_json()
+    assert err["type"] == "error" and "transcript" in err["message"]
+
+
+def test_transcript_verdict_is_passed_through(client: Any) -> None:
+    """A semantic verdict reaches turn-taking: "not complete" holds the turn through the
+    1.5 s of silence after the speech, like an unfinished word does."""
+    _, key = new_org(client)
+    audio = speech_pcm16(pad_s=0.0) + bytes(2 * 16000 * 3 // 2)
+    speech_bytes = len(audio) - 2 * 16000 * 3 // 2
+    with client.websocket_connect("/v1/stream", headers=bearer(key)) as ws:
+        ws.receive_json()
+        cs = chunks(audio)
+        n_speech = speech_bytes // len(cs[0])
+        for c in cs[:n_speech]:
+            ws.send_bytes(c)
+        for c in cs[n_speech : n_speech + 15]:  # an STT verdict lands ~300 ms into the pause
+            ws.send_bytes(c)
+        ws.send_text(json.dumps({"type": "transcript", "text": "شكرا", "complete": False}))
+        for c in cs[n_speech + 15 :]:
+            ws.send_bytes(c)
+        ws.send_text(json.dumps({"type": "transcript", "text": "x", "complete": "yes"}))
+        ws.send_text(json.dumps({"type": "end"}))
+        msgs, _, code = drain(ws)
+    assert code == 1000
+    errors = [m for m in msgs if m.get("type") == "error"]
+    assert errors and "complete" in errors[0]["message"]
+    eots = [m for m in msgs if m.get("type") == "end_of_turn"]
+    assert eots and eots[-1].get("transcript_complete") is False and eots[-1].get("stream_end")
+
+
+def test_relay_agent_transcript_is_used_not_forwarded(client: Any) -> None:
+    import time
+
+    _, key = new_org(client, relay_allowlist=["127.0.0.1"])
+    audio = speech_pcm16(pad_s=0.5)
+    with FakeAgent(transcript="and then um") as agent:
+        target = f"ws://127.0.0.1:{agent.port}/agent"
+        with client.websocket_connect(f"/v1/relay?target={target}", headers=bearer(key)) as ws:
+            ws.receive_json()
+            for c in chunks(audio):
+                ws.send_bytes(c)
+            time.sleep(1.0)
+            ws.send_text(json.dumps({"type": "end"}))
+            msgs, _, code = drain(ws)
+    assert code == 1000
+    assert not any(m.get("type") == "transcript" for m in msgs)  # not sent to the caller
+    eots = [e for e in agent.events if e["type"] == "end_of_turn"]
+    assert eots and eots[-1].get("text_unfinished") is True

@@ -9,6 +9,10 @@ from nexora_audio.backends import deepfilternet as dfn
 from nexora_audio.backends.deepfilternet import LATENCY_SAMPLES, DeepFilterNetProcessor
 from tests.audio_fixtures import mix, pink, si_sdr, speech, white
 
+pytestmark = pytest.mark.skipif(
+    dfn.probe() is not None, reason=f"DeepFilterNet not available here: {dfn.probe()}"
+)
+
 
 def run(proc: DeepFilterNetProcessor, x: np.ndarray) -> np.ndarray:
     n = len(x) // 480 * 480

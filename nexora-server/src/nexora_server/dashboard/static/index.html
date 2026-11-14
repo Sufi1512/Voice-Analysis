@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Nexora Voice Cloud</title>
+  <link rel="stylesheet" href="/dashboard/static/app.css">
+  <script type="module" src="/dashboard/static/app.js"></script>
+</head>
+<body>
+  <a class="skip" href="#main" data-i18n="Skip to content">Skip to content</a>
+  <header class="top">
+    <span class="brand" data-i18n="Nexora Voice Cloud">Nexora Voice Cloud</span>
+    <nav id="nav" hidden data-i18n-label="Main" aria-label="Main">
+      <a href="#/overview" data-i18n="Overview">Overview</a>
+      <a href="#/keys" data-i18n="API keys">API keys</a>
+      <a href="#/profiles" data-i18n="Profiles">Profiles</a>
+      <a href="#/sessions" data-i18n="Sessions">Sessions</a>
+      <a href="#/team" data-i18n="Team">Team</a>
+      <a href="#/billing" data-i18n="Billing">Billing</a>
+      <a href="#/audit" data-i18n="Audit log">Audit log</a>
+      <a href="#/orgs" data-superadmin data-i18n="Organizations">Organizations</a>
+    </nav>
+    <span class="who">
+      <select id="lang" data-i18n-label="Language" aria-label="Language"></select>
+      <select id="org-pick" data-superadmin hidden data-i18n-label="Organization" aria-label="Organization"></select>
+      <span id="who" dir="auto"></span>
+      <button id="signout" class="link" hidden data-i18n="Sign out">Sign out</button>
+    </span>
+  </header>
+  <main id="main" tabindex="-1">
+    <section id="signin" class="card narrow" hidden>
+      <h1 data-i18n="Sign in">Sign in</h1>
+      <p id="signin-help">Paste an API key with the <code>admin</code> scope. It is kept only in this browser tab.</p>
+      <form id="signin-form">
+        <label><span data-i18n="API key">API key</span> <input id="signin-key" type="password" autocomplete="off" required dir="ltr"></label>
+        <button type="submit" data-i18n="Sign in">Sign in</button>
+        <p id="signin-error" class="error" role="alert"></p>
+      </form>
+      <p id="sso" class="muted" hidden><a id="sso-link" href="/auth/oidc/login" data-i18n="Sign in with SSO">Sign in with SSO</a></p>
+    </section>
+    <section id="view" aria-live="polite"></section>
+  </main>
+</body>
+</html>

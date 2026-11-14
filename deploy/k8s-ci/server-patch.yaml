@@ -1,0 +1,17 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nexora-server
+spec:
+  replicas: 2
+  template:
+    spec:
+      initContainers:
+        - name: migrate
+          imagePullPolicy: Never
+      containers:
+        - name: server
+          imagePullPolicy: Never  # loaded into kind, not pulled
+          resources:
+            requests: {cpu: 500m, memory: 1Gi}
+            limits: {cpu: "2", memory: 3Gi}

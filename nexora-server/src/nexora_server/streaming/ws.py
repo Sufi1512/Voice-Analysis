@@ -8,12 +8,26 @@
     The customer's caller connects here; Nexora forwards cleaned audio and events to the
     customer's agent WebSocket (allowlisted URL) and agent audio back to the caller.
 
-Query parameters: ``encoding`` (pcm16|float32|mulaw|alaw), ``sample_rate``, ``channels``,
+Query parameters: ``encoding`` (pcm16|float32|mulaw|alaw|opus; opus = one packet per
+binary message, input only), ``sample_rate``, ``channels``,
 ``output_encoding``, ``output_sample_rate``, ``profile``, ``target`` (relay), ``token``.
 Auth: ``Authorization: Bearer <API key>`` with the ``stream`` scope, or ``token=<session token>``.
 
 Client control messages (JSON text): ``{"type": "agent_speaking", "value": true}``,
+``{"type": "agent_audio", "data": "<base64>"}`` (the agent audio just played to the caller,
+in the stream's input format: the echo reference), ``{"type": "transcript", "text": "..."}``
+(the caller's latest speech-to-text for the current turn: if it ends on a word no sentence
+can end on, such as "...of" or "um", the turn waits longer before ``end_of_turn``; an
+optional ``"complete": true|false`` is a semantic verdict on whether the sentence is
+finished, from a text end-of-utterance model or the LLM, and decides the wait instead of
+Smart Turn's audio verdict),
 ``{"type": "flush"}``, ``{"type": "reset"}``, ``{"type": "end"}``, ``{"type": "ping"}``.
+In Relay mode the agent can send ``transcript`` on its socket; it is used, not forwarded.
+
+Echo: in Relay mode the agent audio the server forwards to the caller is used as the echo
+reference automatically; in Process mode send it with ``agent_audio``. With a reference,
+the agent's own voice coming back is not reported as the caller speaking or interrupting,
+and a profile with ``echo_cancellation: true`` also removes it from the audio.
 
 Server messages: binary audio; JSON ``session.started``, turn events (``speech_start``,
 ``speech_end``, ``end_of_turn``, ``interruption``, ``backchannel``), ``pong``,
@@ -23,6 +37,7 @@ Server messages: binary audio; JSON ``session.started``, turn events (``speech_s
 from __future__ import annotations
 
 import asyncio
+import base64
 import contextlib
 import json
 import logging
@@ -31,22 +46,25 @@ from collections import Counter
 from dataclasses import dataclass
 from typing import Any
 
+import anyio
 import jwt
 from fastapi import APIRouter, WebSocket
 from nexora_audio import AudioFormat, AudioFormatError, StreamSession
 from starlette.concurrency import run_in_threadpool
+from starlette.responses import JSONResponse
 from starlette.websockets import WebSocketDisconnect, WebSocketState
 
 from nexora_server.db import Database, Organization, SessionRecord, utcnow
 from nexora_server.deps import bearer, principal_from_key
 from nexora_server.observability import Metrics
-from nexora_server.relay_policy import RelayTargetError, check_relay_target
+from nexora_server.relay_policy import RelayTargetError, check_relay_target, open_vetted_socket
 from nexora_server.security import decode_session_token
 from nexora_server.services import ServiceError, quota_remaining_s, resolve_profile
 from nexora_server.settings import Settings
 from nexora_server.streaming.manager import CapacityError, SessionManager, SessionSpec
 
 log = logging.getLogger("nexora.stream")
+MAX_TRANSCRIPT_CHARS = 4000  # only the last word is used
 router = APIRouter()
 
 
@@ -68,7 +86,8 @@ class StreamContext:
 
 
 def _fmt(params: dict[str, str], prefix: str = "", base: AudioFormat | None = None) -> AudioFormat:
-    enc = params.get(f"{prefix}encoding", base.encoding if base else "pcm16")
+    default = base.encoding if base and not base.packetized else "pcm16"
+    enc = params.get(f"{prefix}encoding", default)
     rate = int(params.get(f"{prefix}sample_rate", base.sample_rate if base else 16000))
     ch = int(params.get("channels", base.channels if base else 1))
     return AudioFormat(enc, rate, ch)  # type: ignore[arg-type]
@@ -138,14 +157,25 @@ def _prepare(ws: WebSocket, mode: str, settings: Settings, db: Database) -> Stre
         return StreamContext(org, mode, spec, prof.id if prof else None, key_id, target, left)
 
 
+# what a send to a client that already went away can raise (starlette, anyio, the OS)
+_GONE = (
+    RuntimeError,
+    WebSocketDisconnect,
+    OSError,
+    anyio.ClosedResourceError,
+    anyio.BrokenResourceError,
+)
+
+
 async def _send_json(ws: WebSocket, data: dict[str, Any]) -> None:
     if ws.application_state == WebSocketState.CONNECTED:
-        await ws.send_text(json.dumps(data))
+        with contextlib.suppress(*_GONE):  # a caller who hung up is not an error
+            await ws.send_text(json.dumps(data))
 
 
 async def _close(ws: WebSocket, code: int, reason: str) -> None:
     if ws.application_state == WebSocketState.CONNECTED:
-        with contextlib.suppress(RuntimeError, WebSocketDisconnect):
+        with contextlib.suppress(*_GONE):
             await ws.close(code=code, reason=reason[:120])
 
 
@@ -160,9 +190,13 @@ class _Run:
         self.close_code = 1000
         self.close_reason = "normal"
         self.fmt = ctx.spec.input_format
+        self.quality: dict[str, Any] = {}
 
     def account(self, nbytes: int) -> None:
-        self.audio_s += nbytes / self.fmt.bytes_per_frame / self.fmt.sample_rate
+        if self.fmt.packetized:  # Opus: count decoded audio, not bytes
+            self.audio_s = self.session.input_seconds
+        else:
+            self.audio_s += nbytes / self.fmt.bytes_per_frame / self.fmt.sample_rate
 
 
 @router.websocket("/v1/stream")
@@ -181,7 +215,31 @@ async def _serve(ws: WebSocket, mode: str) -> None:
     db: Database = app.state.db
     mgr: SessionManager = app.state.manager
     metrics: Metrics = app.state.metrics
+    # flood control before the handshake is even accepted (HTTP 429, no upgrade)
+    limiter = app.state.connect_limiter
+    client = ws.client.host if ws.client else "unknown"
+    if not limiter.allow(client):
+        metrics.rejections.labels("rate_limited").inc()
+        await _deny(ws, limiter.retry_after_s(client))
+        return
     await ws.accept()
+    # cheap refusal first: a full, overloaded or draining instance turns callers away
+    # before spending a database lookup and key check on them (retry storms, floods)
+    busy = (
+        "draining"
+        if mgr.draining
+        else "capacity"
+        if mgr.active >= mgr.max_sessions
+        else "overloaded"
+        if mgr.overloaded()
+        else None
+    )
+    if busy is not None:
+        reason = f"server {'at capacity' if busy == 'capacity' else busy}, retry another instance"
+        metrics.rejections.labels(busy).inc()
+        await _send_json(ws, {"type": "error", "code": 1013, "message": reason})
+        await _close(ws, 1013, reason)
+        return
     try:
         ctx = await run_in_threadpool(_prepare, ws, mode, settings, db)
     except RejectError as r:
@@ -191,10 +249,18 @@ async def _serve(ws: WebSocket, mode: str) -> None:
         return
 
     try:
-        slot = mgr.slot(ctx.org.id, ctx.org.max_concurrent_sessions)
-        slot.__enter__()
+        slot = await mgr.open_slot(ctx.org.id, ctx.org.max_concurrent_sessions)
     except CapacityError as c:
-        metrics.rejections.labels("capacity" if c.code == 1013 else "org_limit").inc()
+        reason = (
+            "org_limit"
+            if c.code == 4429
+            else "draining"
+            if mgr.draining
+            else "overloaded"
+            if "overloaded" in c.reason
+            else "capacity"
+        )
+        metrics.rejections.labels(reason).inc()
         await _send_json(ws, {"type": "error", "code": c.code, "message": c.reason})
         await _close(ws, c.code, c.reason)
         return
@@ -202,6 +268,7 @@ async def _serve(ws: WebSocket, mode: str) -> None:
     record_id: str | None = None
     session: StreamSession | None = None
     run: _Run | None = None
+    checkpoints: asyncio.Task[None] | None = None
     healthy = True
     metrics.active.labels(mode).inc()
     try:
@@ -210,6 +277,9 @@ async def _serve(ws: WebSocket, mode: str) -> None:
         metrics.session_start_seconds.observe(time.perf_counter() - t0)
         run = _Run(ctx, session)
         record_id = await run_in_threadpool(_create_record, db, ctx, session)
+        checkpoints = asyncio.get_running_loop().create_task(
+            _checkpoint_loop(db, record_id, run, settings.checkpoint_interval_s, metrics)
+        )
         log.info(
             "session started",
             extra={
@@ -242,47 +312,103 @@ async def _serve(ws: WebSocket, mode: str) -> None:
             run.close_code, run.close_reason = 1011, "internal error"
         await _send_json(ws, {"type": "error", "code": 1011, "message": "internal error"})
     finally:
-        metrics.active.labels(mode).dec()
-        slot.__exit__(None, None, None)
-        if run is not None:
-            metrics.audio_seconds.labels(mode).inc(run.audio_s)
-            outcome = "ok" if run.close_code in (1000, 1001) else "error"
-            metrics.sessions.labels(mode, outcome).inc()
-            await _send_json(
-                ws,
-                {
-                    "type": "session.ended",
-                    "session_id": record_id,
-                    "audio_seconds": round(run.audio_s, 3),
-                    "events": dict(run.events),
-                    "close_code": run.close_code,
-                    "reason": run.close_reason,
-                },
-            )
-            if record_id:
-                await run_in_threadpool(_finish_record, db, record_id, run, healthy)
-            log.info(
-                "session ended",
-                extra={
-                    "session_id": record_id,
-                    "org_id": ctx.org.id,
-                    "mode": mode,
-                    "audio_seconds": round(run.audio_s, 3),
-                    "close_code": run.close_code,
-                },
-            )
-            await _close(ws, run.close_code, run.close_reason)
-        if session is not None:
-            mgr.release(ctx.spec, session, healthy)
+        # every step on its own: one failing (caller gone, database down) must not skip
+        # the others, or the call is never recorded/billed and its audio session leaks
+        # shielded: if the connection task is cancelled (client gone), the cleanup still
+        # runs to the end instead of stopping at its first await
+        with anyio.CancelScope(shield=True):
+            if checkpoints is not None:
+                checkpoints.cancel()
+            metrics.active.labels(mode).dec()
+            await slot.close()
+            if run is not None:
+                try:
+                    metrics.audio_seconds.labels(mode).inc(run.audio_s)
+                    outcome = "ok" if run.close_code in (1000, 1001) else "error"
+                    metrics.sessions.labels(mode, outcome).inc()
+                    run.quality = run.session.quality()
+                    metrics.observe_quality(run.quality)
+                except Exception:
+                    log.exception("session metrics failed", extra={"session_id": record_id})
+                await _send_json(
+                    ws,
+                    {
+                        "type": "session.ended",
+                        "session_id": record_id,
+                        "audio_seconds": round(run.audio_s, 3),
+                        "events": dict(run.events),
+                        "close_code": run.close_code,
+                        "reason": run.close_reason,
+                        "quality": run.quality,
+                    },
+                )
+                if record_id:
+                    try:
+                        await run_in_threadpool(_finish_record, db, record_id, run, healthy)
+                    except Exception:  # the call happened: log it loudly for reconciliation
+                        log.exception(
+                            "could not record session end",
+                            extra={"session_id": record_id, "audio_seconds": round(run.audio_s, 3)},
+                        )
+                        metrics.record_errors.inc()
+                log.info(
+                    "session ended",
+                    extra={
+                        "session_id": record_id,
+                        "org_id": ctx.org.id,
+                        "mode": mode,
+                        "audio_seconds": round(run.audio_s, 3),
+                        "close_code": run.close_code,
+                        "quality": run.quality,
+                    },
+                )
+                await _close(ws, run.close_code, run.close_reason)
+            if session is not None:
+                mgr.release(ctx.spec, session, healthy)
 
 
 def _fmt_dict(f: AudioFormat) -> dict[str, Any]:
     return {"encoding": f.encoding, "sample_rate": f.sample_rate, "channels": f.channels}
 
 
+async def _deny(ws: WebSocket, retry_after_s: int) -> None:
+    """Refuse the WebSocket upgrade with HTTP 429 (or a plain close if the server cannot
+    send an HTTP response to a WebSocket request)."""
+    body = {"error": "too many connections from this address", "retry_after_s": retry_after_s}
+    try:
+        await ws.send_denial_response(
+            JSONResponse(body, status_code=429, headers={"Retry-After": str(retry_after_s)})
+        )
+    except RuntimeError:
+        await ws.close(code=1008)
+
+
+async def _checkpoint_loop(
+    db: Database, record_id: str, run: _Run, every_s: float, metrics: Metrics
+) -> None:
+    """Save the call's audio seconds and a heartbeat while it runs, so a call whose server
+    dies is still billed up to its last checkpoint (services.sweep_stale_sessions)."""
+    while True:
+        await asyncio.sleep(every_s)
+        try:
+            await run_in_threadpool(_checkpoint, db, record_id, run.audio_s)
+        except Exception:
+            log.warning("session checkpoint failed", extra={"session_id": record_id})
+            metrics.record_errors.inc()
+
+
+def _checkpoint(db: Database, record_id: str, audio_s: float) -> None:
+    with db.session() as s:
+        rec = s.get(SessionRecord, record_id)
+        if rec is not None and rec.status == "active":
+            rec.audio_seconds = audio_s
+            rec.heartbeat_at = utcnow()
+
+
 def _create_record(db: Database, ctx: StreamContext, session: StreamSession) -> str:
     with db.session() as s:
         rec = SessionRecord(
+            heartbeat_at=utcnow(),
             org_id=ctx.org.id,
             profile_id=ctx.profile_id,
             api_key_id=ctx.api_key_id,
@@ -306,7 +432,8 @@ def _finish_record(db: Database, record_id: str, run: _Run, healthy: bool) -> No
         rec.p99_processing_ms = round(run.session.timing.p99_ms, 3)
         rec.close_code = run.close_code
         rec.close_reason = run.close_reason
-        rec.ended_at = utcnow()
+        rec.quality = run.quality
+        rec.ended_at = rec.heartbeat_at = utcnow()
 
 
 async def _receive(ws: WebSocket, settings: Settings) -> dict[str, Any] | None:
@@ -364,6 +491,37 @@ async def _control(run: _Run, text: str) -> tuple[str, dict[str, Any] | None]:
     if kind == "agent_speaking":
         run.session.set_agent_speaking(bool(msg.get("value")))
         return "ok", None
+    if kind == "agent_audio":
+        try:
+            ref = base64.b64decode(str(msg.get("data", "")), validate=True)
+        except (ValueError, TypeError):
+            return "error", {
+                "type": "error",
+                "code": 4400,
+                "message": "agent_audio.data must be base64",
+            }
+        if not run.fmt.packetized:
+            await asyncio.get_running_loop().run_in_executor(
+                None, run.session.push_reference, ref, run.fmt
+            )
+        return "ok", None
+    if kind == "transcript":
+        text = msg.get("text")
+        if not isinstance(text, str) or len(text) > MAX_TRANSCRIPT_CHARS:
+            return "error", {
+                "type": "error",
+                "code": 4400,
+                "message": f"transcript.text must be text, at most {MAX_TRANSCRIPT_CHARS} chars",
+            }
+        complete = msg.get("complete")
+        if complete is not None and not isinstance(complete, bool):
+            return "error", {
+                "type": "error",
+                "code": 4400,
+                "message": "transcript.complete must be true, false or absent",
+            }
+        run.session.push_transcript(text, complete)
+        return "ok", None
     if kind == "ping":
         return "ok", {"type": "pong", "audio_seconds": round(run.audio_s, 3)}
     if kind in ("flush", "end", "reset"):
@@ -420,13 +578,27 @@ async def _relay_loop(
 ) -> None:
     import websockets
 
-    assert run.ctx.relay_target is not None
+    target = run.ctx.relay_target
+    if target is None:
+        raise RuntimeError("relay session without a target")
     # re-check right before connecting (DNS may have changed since the token was minted)
-    check_relay_target(run.ctx.relay_target, run.ctx.org.relay_allowlist, settings.deployment_mode)
+    host = check_relay_target(target, run.ctx.org.relay_allowlist, settings.deployment_mode)
     try:
-        agent = await websockets.connect(
-            run.ctx.relay_target, open_timeout=10, max_size=settings.max_message_bytes * 4
+        # SaaS: connect to the address just vetted, never re-resolve (DNS rebinding)
+        sock = await asyncio.get_running_loop().run_in_executor(
+            None, open_vetted_socket, target, settings.deployment_mode
         )
+        extra: dict[str, Any] = {}
+        if sock is not None:
+            extra["sock"] = sock
+            if target.startswith("wss://"):
+                extra["server_hostname"] = host
+        agent = await websockets.connect(
+            target, open_timeout=10, max_size=settings.max_message_bytes * 4, **extra
+        )
+    except RelayTargetError as exc:
+        run.close_code, run.close_reason = 4003, str(exc)[:120]
+        return
     except (OSError, websockets.InvalidHandshake, TimeoutError) as exc:
         run.close_code, run.close_reason = 4502, f"could not reach agent: {type(exc).__name__}"
         return
@@ -482,14 +654,27 @@ async def _relay_loop(
                 if isinstance(msg, bytes):
                     last_agent_audio[0] = time.monotonic()
                     run.session.set_agent_speaking(True)
+                    if not run.fmt.packetized:  # the agent audio is the echo reference
+                        await asyncio.get_running_loop().run_in_executor(
+                            None, run.session.push_reference, msg, run.fmt
+                        )
                     if ws.application_state == WebSocketState.CONNECTED:
                         await ws.send_bytes(msg)
                 else:
+                    forward = True
                     with contextlib.suppress(ValueError, TypeError, AttributeError):
                         data = json.loads(msg)
                         if data.get("type") == "agent_speaking":
                             run.session.set_agent_speaking(bool(data.get("value")))
-                    if ws.application_state == WebSocketState.CONNECTED:
+                        elif data.get("type") == "transcript":  # for Nexora, not the caller
+                            forward = False
+                            text = data.get("text")
+                            done = data.get("complete")
+                            if isinstance(text, str) and len(text) <= MAX_TRANSCRIPT_CHARS:
+                                run.session.push_transcript(
+                                    text, done if isinstance(done, bool) else None
+                                )
+                    if forward and ws.application_state == WebSocketState.CONNECTED:
                         await ws.send_text(msg)
         except websockets.ConnectionClosed:
             pass

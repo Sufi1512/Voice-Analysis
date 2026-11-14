@@ -29,7 +29,8 @@ than `qualitylab/baseline.json` by more than its tolerance. CI: `.github/workflo
 | reverb | 6 | Synthetic rooms, RT60 0.3 and 0.6 s, plus noise |
 | loss | 16 | 1, 3, 5, 10% packet loss (bursty), each paired with a loss-free twin |
 | echo | 12 | Agent speech leaking back through a simulated speakerphone (delay 40/120/250 ms, echo at 0 and −10 dB), agent-only and double-talk |
-| turns | 8 | Speech with inserted pauses of 400–1200 ms, to measure cut-offs and reply delay |
+| turns_tts | 50 | Synthetic English and Arabic caller turns (offline TTS, scripted), one pause each, wideband and 8 kHz phone line; only where generated (`SOURCES.md`) |
+| turns | 26 | Speech with inserted pauses of 400–1500 ms, to measure cut-offs and reply delay: 7 inside an unfinished sentence, 11 after a clause the sentence goes on from, 8 cases (16 pauses) between two full sentences (see `E5_SPEC.md`) |
 
 Sources and licences: `qualitylab/SOURCES.md`. Speech-to-text accuracy uses Whisper tiny.en
 as a stand-in for the customer's STT, with the clean-speech transcript as reference.
@@ -77,16 +78,16 @@ level rose from −31 to −24 dBFS, on airport announcements). That is phase E3
 | Noise in pauses, 0–20 dB SNR, worst case | ≤ −60 dB | −2.5 dB | E3 |
 | Loudest noise left in pauses | ≤ −70 dBFS | −24 dBFS | E3 |
 | Noise pumping, worst case | ≤ 3 dB | 21 dB | E3 |
-| Echo removed (ERLE), worst case | ≥ 30 dB | 0.2 dB | E4 |
-| False barge-ins on echo-only audio | 0 | 6 of 6 cases | E4 |
-| Missed barge-ins in double-talk | ≤ 2% | 100% | E4 |
+| Echo removed (ERLE), worst case | ≥ 30 dB | 0.2 dB (14.4 after E4, median 26.9) | E4 |
+| False barge-ins on echo-only audio | 0 | 6 of 6 cases (0 after E4: pass) | E4 |
+| Missed barge-ins in double-talk | ≤ 2% | 100% (18.75% after E4) | E4 |
 | Caller speech cut while the agent talks | ≤ 3% | 0.7% | pass |
 | Mid-sentence pauses taken as end of turn | ≤ 3% | 88% | E5 |
 | Reply gap, median | ≤ 800 ms | 704 ms | pass (enforced) |
 | Added delay | ≤ 40 ms | 34 ms | pass (enforced) |
 | Reported delay matches measured | ≤ 5 ms error | 0.06 ms | pass (enforced) |
 | Processing per 20 ms chunk, p99 | ≤ 10 ms | 11 ms with 2 workers sharing 2 CPUs (7–8 ms alone) | E4 |
-| Intelligibility lost to 5% packet loss | ≤ 0.05 STOI | 0.09 | E2 |
+| Intelligibility lost to 5% packet loss | ≤ 0.05 STOI | 0.09 (0.039 after E2: pass) | E2 |
 
 What the numbers say, in plain words:
 
@@ -102,6 +103,95 @@ What the numbers say, in plain words:
   inserted at natural word gaps, so the real silence is a little longer than the inserted
   pause; treat 88% as an upper bound. Phase E5.
 - **Packet loss**: gaps arrive as silence and cost up to 0.09 STOI at 5% loss. Concealment is phase E2.
+
+## Update after E2 (same day)
+
+E2 (`E2_SPEC.md`) added packet-loss concealment, Opus input, per-call quality numbers and
+the Dograh engine. Full-profile re-run (`docs/quality/report-full-2026-11-13-e2.md`):
+no gate got worse, and the packet-loss gate now passes.
+
+| Packet loss (paired with the loss-free twin) | Before (worst STOI drop) | After |
+| --- | --- | --- |
+| 1% | 0.043 | 0.031 |
+| 3% | 0.077 | 0.038 |
+| 5% (gate ≤ 0.05) | 0.092 | **0.039** |
+| 10% | 0.135 | 0.066 |
+
+The single 5% case in the fast profile went from 0.108 to 0.070: better, still above
+target, so 10% loss and some 5% patterns remain E3 work (longer gaps fade out by design).
+
+The transcription gates are now reported without a baseline check: the first GitHub run
+showed Whisper's output differs between CPU types (noisy-speech WER gain 4.9% there vs
+14.3% here), while every other metric matched exactly.
+
+## Update after E4 (2026-11-14)
+
+E4 (`E4_SPEC.md`): echo reference, echo-aware barge-in and the WebRTC AEC3 canceller. The
+echo set grew to 28 cases (adds 400 ms delay, echo 6 dB louder than the caller, headsets,
+and interruptions in the agent's first second). Echo cases now run with
+`echo_cancellation=True`. Report: `docs/quality/report-full-2026-11-14-e4.md`.
+
+| Echo gate | Before E4 | After E4 |
+| --- | --- | --- |
+| False barge-ins on echo-only audio | 6 of 6 cases | **0** (now enforced) |
+| Missed barge-ins in double-talk | 100% | 18.75% (3 of 16, all with echo louder than the caller) |
+| Echo removed, worst case | 0.2 dB | 14.4 dB (median 26.9 dB) |
+| Caller speech cut while both talk, worst case | 1.2% | 42% (interruption in the agent's first second; median 8.2%) |
+
+The last row is a deliberate trade-off, accepted into the baseline: removing the agent's
+echo costs some caller audio while both talk, mostly before the canceller has adapted.
+No other gate changed.
+
+## Update after E3 (2026-11-14)
+
+E3 (`E3_SPEC.md`) adds the background-talker gate: speech 17 dB or more below the caller's
+level is treated as background and removed in pauses. Report: `docs/quality/report-full-2026-11-14-e3.md`.
+
+| Pause noise, median | Before E3 | After E3 |
+| --- | --- | --- |
+| Babble | -24.0 dB | -36.8 dB |
+| Airport announcements | -44.9 dB | -49.6 dB |
+| Phone set | -54.0 dB | -62.8 dB |
+| Music | -43.6 dB | -44.4 dB |
+| TV / neighbour (as loud as the caller) | -3.9 dB | -3.9 dB (needs E11) |
+
+Speech cut: clean speech average 0.11% → 0.20%; phone worst case unchanged (3.7%).
+
+## Update after E5 (2026-11-14)
+
+E5 (`E5_SPEC.md`) adds Smart Turn v3.2: at each pause it judges whether the caller sounds
+finished, and waits 2 s instead of 700 ms when they do not. The turn cases were extended
+first: the old ones only paused between two full sentences. Report:
+`docs/quality/report-full-2026-11-14-e5.md`.
+
+| Pauses taken as end of turn | Before E5 (700 ms rule) | After E5 |
+| --- | --- | --- |
+| Inside an unfinished sentence (7) | 71% | 14% (1 of 7) |
+| After a clause, sentence goes on (11) | 73% | 36% |
+| Between two full sentences (16) | 88% | 75% |
+| Reply gap, median / p90 | 650 / 744 ms | 648 / 1328 ms |
+
+The before column is the old rule on the new cases; the old `turn_cutoff` baseline (87.5%)
+measured the between-sentence pauses only. Every other gate is unchanged from E3.
+`chunk_time` read 11.3 ms with two workers sharing two CPUs; unloaded, the same cases take
+5.9 ms with Smart Turn and 5.6 ms without.
+
+## Update after E5b (2026-11-14)
+
+E5b (`E5B_SPEC.md`) lets the caller's transcript hold a turn whose last word cannot end a
+sentence. Turn cases now get simulated STT text (Whisper tiny.en) 300 ms into each pause
+when the lab runs with STT. All gates unchanged from E5; the new `text_hold` gate (finished
+turns held up by the text) is 0%. One E5 test point (`clnsp18`) was moved from inside a
+word to the word gap. Report: `docs/quality/report-full-2026-11-14-e5b.md`.
+
+## Update after E5c (2026-11-14)
+
+Synthetic English and Arabic calls (`turns_tts`, 50 cases; `E5B_SPEC.md`). Mid-sentence pauses
+taken as end of turn: English 18%, Arabic 5% (silence rule alone: 77% / 80%). Arabic replies
+take 1.9 s (median) because Smart Turn hears most finished sentences from this voice as
+unfinished (`OPEN_ISSUES.md` I-013). All other gates unchanged. `chunk_time` in this run (52.9
+ms) was taken while other test suites shared the CPUs; the baseline keeps 8.8 ms. Report:
+`docs/quality/report-full-2026-11-14-e5c.md`.
 
 ## Known limits of this baseline
 

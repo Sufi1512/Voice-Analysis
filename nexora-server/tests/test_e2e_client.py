@@ -26,10 +26,14 @@ def free_port() -> int:
         return port
 
 
+live_server_app: list[Any] = []
+
+
 @pytest.fixture
 def live_server(tmp_path: Path) -> Any:
     port = free_port()
     app = create_app(make_settings(tmp_path), prewarm=True)
+    live_server_app[:] = [app]
     server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_config=None))
     t = threading.Thread(target=server.run, daemon=True)
     t.start()
@@ -109,3 +113,33 @@ def test_rejection_surfaces_as_exception(live_server: str) -> None:
     with pytest.raises(nexora_client.NexoraError) as exc:
         asyncio.run(main())
     assert exc.value.code == 4001
+
+
+def test_client_retries_while_server_drains(live_server: str) -> None:
+    """Close code 1013 (draining) is retried; once an instance takes the call it works."""
+    base = live_server
+    r = httpx.post(
+        f"{base}/v1/orgs", json={"name": "Retry"}, headers={"Authorization": f"Bearer {ADMIN}"}
+    )
+    api_key = r.json()["api_key"]
+    app = live_server_app[0]
+    app.state.start_draining()
+
+    def undrain() -> None:  # stands in for the load balancer picking a healthy instance
+        time.sleep(0.6)
+        app.state.manager.draining = False
+
+    async def main() -> str:
+        async with nexora_client.NexoraClient(base, api_key) as nx:
+            with pytest.raises(nexora_client.NexoraError) as err:
+                async with nx.stream(retries=0):
+                    pass
+            assert err.value.code == 1013
+            threading.Thread(target=undrain, daemon=True).start()
+            async with nx.stream(retries=4) as s:
+                await s.request_end()
+                async for _ in s:
+                    pass
+                return str(s.summary and s.summary.get("type"))
+
+    assert asyncio.run(main()) == "session.ended"

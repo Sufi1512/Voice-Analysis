@@ -16,8 +16,58 @@ from qualitylab.corpus import Case
 CHUNK_MS = 20
 
 
-def process(case: Case, settings: dict[str, Any]) -> dict[str, Any]:
-    """Stream the case through a StreamSession in 20 ms chunks, as a live call would."""
+STT_DELAY_S = 0.3  # a streaming STT's final arrives about this long into a pause
+
+
+_FROZEN: dict[str, list[list[Any]]] | None = None
+
+
+def _frozen_transcripts() -> dict[str, list[list[Any]]]:
+    """``turn_transcripts.json``: Whisper tiny.en's text for each turn case, made once
+    (2026-11-14) so the text cue sees identical words on every machine."""
+    global _FROZEN
+    if _FROZEN is None:
+        import json
+        from pathlib import Path
+
+        f = Path(__file__).with_name("turn_transcripts.json")
+        _FROZEN = json.loads(f.read_text()) if f.exists() else {}
+    return _FROZEN
+
+
+def turn_transcripts(case: Case) -> list[tuple[float, str]]:
+    """(time, text) a streaming STT would send for a turn case: the caller's words up to
+    each pause and up to the true end, STT_DELAY_S after the speech stops. Whisper tiny.en
+    on the last 4 s of clean speech stands in for the customer's STT."""
+    from qualitylab import stt
+
+    if "texts" in case.labels:  # scripted (synthetic) speech: the text is known
+        return [(t + STT_DELAY_S, text) for t, text in case.labels["texts"]]
+    frozen = _frozen_transcripts().get(case.id)
+    if frozen is not None:  # same text on every machine (Whisper varies across CPUs)
+        return [(float(t), str(text)) for t, text in frozen]
+    rate = case.rate
+    points = [a for a, _ in case.labels["pauses"]] + [case.labels["true_end"]]
+    out = []
+    for t in points:
+        x = case.clean[max(0, round((t - 4.0) * rate)) : round(t * rate)]
+        out.append((t + STT_DELAY_S, stt.transcribe(x, rate)))
+    return out
+
+
+def process(case: Case, settings: dict[str, Any], stt_text: bool = False) -> dict[str, Any]:
+    """Stream the case through a StreamSession in 20 ms chunks, as a live call would.
+
+    With ``stt_text`` (turn cases), simulated STT transcripts are pushed during pauses.
+
+    Echo cases run with echo cancellation on (what a speakerphone deployment uses) unless
+    the run overrides ``echo_cancellation``; the agent audio is pushed as the reference."""
+    if case.set == "echo" and "echo_cancellation" not in settings:
+        settings = {**settings, "echo_cancellation": True}
+    # lab only: send a semantic end-of-utterance verdict with each scripted transcript,
+    # as a text end-of-turn model would ("perfect", or "wrong20": wrong 1 time in 5)
+    settings = dict(settings)
+    hint_mode = settings.pop("lab_transcript_hint", None)
     fmt = AudioFormat(encoding=case.encoding, sample_rate=case.rate)  # type: ignore[arg-type]
     wire = encode(case.mic[None, :], fmt)
     step = fmt.bytes_for_ms(CHUNK_MS)
@@ -25,15 +75,30 @@ def process(case: Case, settings: dict[str, Any]) -> dict[str, Any]:
     out = bytearray()
     events: list[dict[str, Any]] = []
     times: list[float] = []
+    ref_fmt = AudioFormat(encoding="float32", sample_rate=case.rate)
+    texts = turn_transcripts(case) if stt_text else []
+    end_text = texts[-1][1] if texts else None
+    verdicts = _verdicts(case, len(texts), hint_mode)
     with StreamSession(input_format=fmt, **settings) as sess:
         latency_ms = sess.latency_ms
         speaking = False
         for k, i in enumerate(range(0, len(wire), step)):
             t = k * chunk_s
             now = any(s <= t < e for s, e in case.agent_spans)
-            if now != speaking:
+            if case.reference is not None:
+                # the agent audio the server sends to the caller, in real time
+                n = len(case.reference)
+                a, b = (
+                    min(n, k * step // fmt.bytes_per_frame),
+                    min(n, (k + 1) * step // fmt.bytes_per_frame),
+                )
+                if b > a:
+                    sess.push_reference(encode(case.reference[None, a:b], ref_fmt), ref_fmt)
+            elif now != speaking:
                 sess.set_agent_speaking(now)
                 speaking = now
+            while texts and texts[0][0] <= t:
+                sess.push_transcript(texts.pop(0)[1], verdicts.pop(0))
             t0 = time.perf_counter()
             res = sess.process(wire[i : i + step])
             times.append(time.perf_counter() - t0)
@@ -50,7 +115,21 @@ def process(case: Case, settings: dict[str, Any]) -> dict[str, Any]:
         "latency_ms": latency_ms,
         "chunk_p99_ms": float(np.percentile(times, 99) * 1000),
         "backends": backends,
+        "end_text": end_text,
     }
+
+
+def _verdicts(case: Case, n: int, mode: str | None) -> list[bool | None]:
+    """Semantic verdicts for the scripted transcripts: the sentence is finished at the end
+    and at a pause between two sentences, not at a mid-sentence pause."""
+    if mode is None or "texts" not in case.labels:
+        return [None] * n
+    truth = [case.meta.get("kind") == "sentence"] * (n - 1) + [True]
+    if mode == "perfect":
+        return list(truth)
+    if mode == "wrong20":
+        return [v != (zlib.crc32(f"{case.id}#{i}".encode()) % 5 == 0) for i, v in enumerate(truth)]
+    raise ValueError(f"lab_transcript_hint: unknown mode {mode!r}")
 
 
 _STT_MEMO: dict[int, str] = {}
@@ -66,7 +145,8 @@ def _transcribe_memo(x: np.ndarray, rate: int) -> str:
 
 
 def measure(case: Case, settings: dict[str, Any], use_stt: bool) -> dict[str, Any]:
-    r = process(case, settings)
+    stt_text = case.set == "turns_tts" or (use_stt and case.set == "turns")
+    r = process(case, settings, stt_text)
     rate = case.rate
     n = len(case.mic)
     delay = round(r["latency_ms"] * rate / 1000)
@@ -99,6 +179,12 @@ def measure(case: Case, settings: dict[str, Any], use_stt: bool) -> dict[str, An
             row["pause_level_dbfs"] = round(m.pause_level_dbfs(out, rate, case.speech_span), 1)
             row["under_voice_db"] = round(m.under_voice_db(case.clean, case.noise, out, rate), 1)
             row["pumping_db"] = round(m.pumping_db(out, rate, case.speech_span), 2)
+            # the swing processing adds: the noise's own swing in pauses (door slams,
+            # typing) is not pumping
+            row["pumping_added_db"] = round(
+                row["pumping_db"] - m.pumping_db(case.mic, rate, case.speech_span), 2
+            )
+            row["pumping_added_over3"] = row["pumping_added_db"] > 3.0
         if case.set == "clean":
             est = m.estimate_delay(case.clean, r["out"], int(0.2 * rate))
             row["latency_measured_ms"] = round(est * 1000 / rate, 2)
@@ -126,9 +212,15 @@ def measure(case: Case, settings: dict[str, Any], use_stt: bool) -> dict[str, An
             row["false_barge_ins"] = len(interruptions)
         else:
             s0, s1 = case.speech_span
-            hit = [e for e in interruptions if s0 <= e["time_ms"] / 1000 - lat_s <= s0 + 1.5]
+            # reported within 1.5 s of the caller starting (2 s for an early interruption,
+            # while the echo path is still being learned)
+            limit = 1.5 if s0 >= 3.0 else 2.0
+            hit = [e for e in interruptions if s0 <= e["time_ms"] / 1000 - lat_s <= s0 + limit]
             early = [e for e in interruptions if e["time_ms"] / 1000 - lat_s < s0]
             row["missed_barge_in"] = int(not hit)
+            row["barge_in_delay_ms"] = (
+                round((hit[0]["time_ms"] / 1000 - lat_s - s0) * 1000) if hit else None
+            )
             row["false_barge_ins"] = len(early)
             nz = (case.echo if case.echo is not None else 0) + (
                 case.noise if case.noise is not None else 0
@@ -138,8 +230,12 @@ def measure(case: Case, settings: dict[str, Any], use_stt: bool) -> dict[str, An
             if sp.stop - sp.start > rate:
                 row["double_talk_stoi"] = round(m.stoi(case.clean[sp], out[sp], rate), 4)
 
-    if case.set == "turns":
-        eot = [e["time_ms"] / 1000 - lat_s for e in ev if e["type"] == "end_of_turn"]
+    if case.set in ("turns", "turns_tts"):
+        eot = [
+            e["time_ms"] / 1000 - lat_s
+            for e in ev
+            if e["type"] == "end_of_turn" and not e.get("stream_end")
+        ]
         pauses = case.labels["pauses"]
         cut = [any(s <= t <= e + 0.2 for t in eot) for s, e in pauses]
         row["pauses"] = len(pauses)
@@ -148,6 +244,11 @@ def measure(case: Case, settings: dict[str, Any], use_stt: bool) -> dict[str, An
         row["reply_gap_ms"] = (
             round((after[0] - case.labels["true_end"]) * 1000, 1) if after else None
         )
+        row["text_cue"] = stt_text
+        if stt_text:  # the cost of the cue: a finished turn whose text "sounds unfinished"
+            from nexora_audio.streaming.text_cues import sounds_unfinished
+
+            row["end_text_unfinished"] = sounds_unfinished(r["end_text"])
     return row
 
 

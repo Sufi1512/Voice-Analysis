@@ -13,6 +13,7 @@ Sets (see VOICE_QUALITY_PLAN.md, "How we prove it"):
 
 from __future__ import annotations
 
+import json
 import zlib
 from collections.abc import Iterator
 from dataclasses import dataclass, field
@@ -171,27 +172,33 @@ def echo_case(
     clip_near: str | None,
     near: np.ndarray | None,
     delay_ms: float,
-    echo_db: float,
+    echo_db: float | None,
+    interrupt_s: float = 3.5,
 ) -> Case:
-    """Agent talks from 1.0 s; with ``near`` the caller starts talking 2.5 s into it."""
+    """Agent talks from 1.0 s; with ``near`` the caller starts talking at ``interrupt_s``.
+    ``echo_db=None``: no echo at all (a headset, or a device that cancels it)."""
     ref = np.concatenate([np.zeros(RATE), _level(agent), np.zeros(int(2.5 * RATE))])
     n = len(ref)
     agent_span = (1.0, 1.0 + len(agent) / RATE)
     echo = synth.echo_path(ref, RATE, delay_ms, seed_of(clip_agent, delay_ms))
-    echo = echo * np.sqrt(10 ** ((SPEECH_DBFS + echo_db) / 10) / synth.active_power(echo))
+    if echo_db is None:
+        echo = np.zeros_like(echo)
+    else:
+        echo = echo * np.sqrt(10 ** ((SPEECH_DBFS + echo_db) / 10) / synth.active_power(echo))
     clean = np.zeros(n, np.float32)
     span = (0.0, 0.0)
     kind = "single"
     if near is not None:
         kind = "double"
-        start = int(3.5 * RATE)
+        start = int(interrupt_s * RATE)
         seg = _level(near)[: n - start - RATE // 2]
         clean[start : start + len(seg)] = seg
         span = (start / RATE, (start + len(seg)) / RATE)
     floor = synth.scale_to_snr(_level(agent), _noise("pink", n, seed_of("echo", clip_agent)), 45)
     mic = (clean + echo + floor).astype(np.float32)
     return Case(
-        f"echo/{kind}/{delay_ms:g}ms/{echo_db:+g}dB/{clip_agent}",
+        f"echo/{kind}/{delay_ms:g}ms/{'none' if echo_db is None else f'{echo_db:+g}dB'}"
+        f"{'' if interrupt_s == 3.5 else f'/at{interrupt_s:g}s'}/{clip_agent}",
         "echo",
         RATE,
         mic,
@@ -211,15 +218,54 @@ def echo_case(
     )
 
 
-def turn_case(clip: str, speech: np.ndarray, pauses_ms: list[float]) -> Case:
-    """Insert silent pauses at the quietest word gaps; the turn really ends after the clip."""
+# Pause points inside a sentence (seconds into the MS-SNSD clip), each at a short word gap.
+# Chosen from Whisper transcripts of the 2.5 s before and 1.5 s after the point, checked by
+# hand, and labelled by grammar alone (not by any turn model):
+#   mid    - the words so far cannot be a whole sentence: "...a lot of | people will roam",
+#            "...ten years ago they | blew up some of our ditches"
+#   clause - they could be, but the speaker goes on with the same sentence: "his captain was
+#            thin and haggard | and his beautiful boots were worn"
+MID_SENTENCE_POINTS: dict[str, list[float]] = {
+    "clnsp15": [3.30, 7.76],
+    "clnsp17": [2.15],
+    "clnsp18": [8.37],  # "...can | expect"; 8.55 (E5) was inside "ex|pect", fixed in E5b
+    "clnsp19": [7.76],
+    "clnsp22": [1.64, 10.12],
+}
+CLAUSE_POINTS: dict[str, list[float]] = {
+    "clnsp15": [2.25, 6.63],
+    "clnsp16": [3.36],
+    "clnsp17": [3.69, 5.52],
+    "clnsp18": [6.67],
+    "clnsp19": [8.08],
+    "clnsp20": [5.25],
+    "clnsp22": [7.34, 11.10],
+    "clnsp23": [2.80],
+}
+
+
+def turn_case(
+    clip: str,
+    speech: np.ndarray,
+    pauses_ms: list[float],
+    at_s: list[float] | None = None,
+    kind: str = "mid",
+) -> Case:
+    """Insert silent pauses; the turn really ends after the clip.
+
+    Without ``at_s`` the pauses go in the quietest gaps near 1/3 and 2/3 of the clip, which in
+    this read-speech corpus are the gaps *between two full sentences* (kind ``sentence``).
+    With ``at_s`` they go at those points (``kind`` ``mid`` or ``clause``, see above).
+    """
     x = _level(speech)
     hop = RATE // 50
     e = np.convolve(
         np.mean(x[: len(x) // hop * hop].reshape(-1, hop) ** 2, axis=1), np.ones(5) / 5, mode="same"
     )
     cuts: list[int] = []
-    for k, _ in enumerate(pauses_ms):
+    if at_s is not None:
+        cuts = [round(t * RATE) for t in at_s]
+    for k, _ in enumerate(pauses_ms if at_s is None else []):
         lo, hi = (
             len(e) * (k + 1) // (len(pauses_ms) + 1) - len(e) // 8,
             len(e) * (k + 1) // (len(pauses_ms) + 1) + len(e) // 8,
@@ -238,8 +284,10 @@ def turn_case(clip: str, speech: np.ndarray, pauses_ms: list[float]) -> Case:
     s = _pad(body, tail=3.0)
     nz = synth.scale_to_snr(s, _noise("pink", len(s), seed_of(clip, "turn")), 25)
     end = LEAD_S + len(body) / RATE
+    if at_s is None:
+        kind = "sentence"
     return Case(
-        f"turns/{clip}",
+        f"turns/{clip}" if at_s is None else f"turns-{kind}/{clip}@{at_s[0]:.2f}",
         "turns",
         RATE,
         (s + nz).astype(np.float32),
@@ -247,11 +295,91 @@ def turn_case(clip: str, speech: np.ndarray, pauses_ms: list[float]) -> Case:
         nz,
         speech_span=(LEAD_S, end),
         labels={"pauses": pauses, "true_end": end},
-        meta={"clip": clip, "pauses_ms": pauses_ms},
+        meta={"clip": clip, "pauses_ms": pauses_ms, "kind": kind},
     )
 
 
+def mid_turn_cases(clips: dict[str, np.ndarray]) -> Iterator[Case]:
+    """One hesitation pause (0.6-1.5 s) inside a sentence per case."""
+    lengths = [600, 900, 1200, 1500]
+    k = 0
+    for kind, table in (("mid", MID_SENTENCE_POINTS), ("clause", CLAUSE_POINTS)):
+        for clip, points in table.items():
+            if clip not in clips:
+                continue
+            for t in points:
+                yield turn_case(clip, clips[clip], [lengths[k % 4]], at_s=[t], kind=kind)
+                k += 1
+
+
 # -- profiles -----------------------------------------------------------------------
+
+
+def tts_turn_cases() -> Iterator[Case]:
+    """The synthetic turn set (``turns_tts``), if ``qualitylab/tts_gen.py`` has been run.
+
+    English and Arabic scripted caller turns (``tts_scripts.py``) with one pause each,
+    0.6-1.5 s, alternating a wideband line with 25 dB pink noise and an 8 kHz u-law phone
+    line with 20 dB pink noise. The known text stands in for a perfect STT."""
+    root = sources.cache_dir() / "tts" / "turns"
+    index = root / "labels.json"
+    if not index.exists():
+        return
+    from scipy.io import wavfile
+
+    lengths = [600, 900, 1200, 1500]
+    for k, c in enumerate(json.loads(index.read_text())["cases"]):
+        _, raw = wavfile.read(root / f"{c['id']}.wav")
+        x = _level(raw.astype(np.float32) / 32768)
+        ms = lengths[k % 4]
+        cut = int(c["cut"])
+        body = np.concatenate([x[:cut], np.zeros(int(ms / 1000 * RATE), np.float32), x[cut:]])
+        pause = (LEAD_S + cut / RATE, LEAD_S + cut / RATE + ms / 1000)
+        end = LEAD_S + len(body) / RATE
+        s = _pad(body, tail=3.0)
+        phone = k % 2 == 1
+        nz = synth.scale_to_snr(
+            s, _noise("pink", len(s), seed_of(c["id"], "tts")), 20 if phone else 25
+        )
+        labels = {
+            "pauses": [pause],
+            "true_end": end,
+            "texts": [(pause[0], c["text_at_pause"]), (end, c["text"])],
+        }
+        meta = {
+            "clip": c["id"],
+            "lang": c["lang"],
+            "kind": c["kind"],
+            "variant": c["variant"],
+            "line": "phone" if phone else "wideband",
+            "pauses_ms": [ms],
+        }
+        if phone:
+            mic8, _ = synth.phone_line(s + nz, "mulaw")
+            yield Case(
+                f"turns_tts/{c['id']}/phone",
+                "turns_tts",
+                8000,
+                mic8,
+                synth.band8k(s),
+                synth.band8k(nz),
+                encoding="mulaw",
+                speech_span=(LEAD_S, end),
+                labels=labels,
+                meta=meta,
+            )
+        else:
+            yield Case(
+                f"turns_tts/{c['id']}/wideband",
+                "turns_tts",
+                RATE,
+                (s + nz).astype(np.float32),
+                s,
+                nz,
+                speech_span=(LEAD_S, end),
+                labels=labels,
+                meta=meta,
+            )
 
 
 def _clips() -> tuple[list[str], dict[str, np.ndarray]]:
@@ -286,7 +414,15 @@ def build(profile: str) -> Iterator[Case]:
         yield from loss_cases(clip(4), clips[clip(4)], 5)
         yield echo_case(clip(5), clips[clip(5)], None, None, 120, 0)
         yield echo_case(clip(6), clips[clip(6)], clip(7), clips[clip(7)], 120, 0)
+        yield echo_case(clip(9), clips[clip(9)], clip(10), clips[clip(10)], 0, None)
         yield turn_case(clip(8), clips[clip(8)], [500, 900])
+        if "clnsp19" in clips:
+            yield turn_case("clnsp19", clips["clnsp19"], [900], at_s=[7.76])
+        # four of the full profile's turn cases too: a median over two turns flipped with
+        # one case (OPEN_ISSUES I-042)
+        for i, plan in enumerate([[400, 800], [600, 1000], [500, 1200], [700, 900]]):
+            c = clip(i + 13)
+            yield turn_case(c, clips[c], plan)
         return
     if profile != "full":
         raise ValueError(f"unknown profile {profile!r}")
@@ -311,13 +447,21 @@ def build(profile: str) -> Iterator[Case]:
             c = clip(i * 2 + j + 11)
             yield from loss_cases(c, clips[c], pct)
     e = 0
-    for delay in (40, 120, 250):
-        for edb in (0, -10):
+    for delay in (40, 120, 250, 400):
+        for edb in (6, 0, -10):
             a, b = clip(e + 5), clip(e + 6)
             yield echo_case(a, clips[a], None, None, delay, edb)
             yield echo_case(a, clips[a], b, clips[b], delay, edb)
             e += 2
+    for i in range(2):  # headset: no echo, the caller must still be able to interrupt
+        a, b = clip(i + 3), clip(i + 4)
+        yield echo_case(a, clips[a], b, clips[b], 0, None)
+    for i, edb in enumerate((0, -10)):  # interrupting in the agent's first second
+        a, b = clip(i + 9), clip(i + 10)
+        yield echo_case(a, clips[a], b, clips[b], 120, edb, interrupt_s=1.6)
     plans = [[400, 800], [600, 1000], [500, 1200], [700, 900]]
     for i in range(8):
         c = clip(i + 13)
         yield turn_case(c, clips[c], plans[i % len(plans)])
+    yield from mid_turn_cases(clips)
+    yield from tts_turn_cases()

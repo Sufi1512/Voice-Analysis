@@ -49,13 +49,19 @@ def on_agent_tts(playing: bool) -> None:
 |---|---|---|
 | `speech_start` | user started talking | optional: lower TTS volume |
 | `speech_end` | user stopped (300 ms silence) | |
-| `end_of_turn` | user finished their turn (700 ms silence after at least 200 ms of speech) | send the transcript to the LLM |
+| `end_of_turn` | user finished their turn: 700 ms of silence if it sounds finished, 2 s if it sounds unfinished (Smart Turn), at least 200 ms of speech | send the transcript to the LLM |
 | `interruption` | user talked over the agent for 400 ms or more | stop TTS now |
 | `backchannel` | short "uh-huh"/"yeah" while the agent talks | keep talking |
 
-Turn and interruption detection is **rule-based** (Silero VAD plus timing, tunable via
-`TurnConfig`). It doesn't understand words, so it can't tell an unfinished sentence from
-a finished one, or a short "stop!" from a short "yeah".
+End of turn uses **Smart Turn v3.2** (Daily, BSD-2, bundled): at each pause it judges from
+the audio whether the caller sounds finished, and waits longer when they don't ("I'd like
+to book a flight to..."). `end_of_turn` carries `complete_probability`. Tune it with
+`TurnConfig` (`complete_silence_ms`, `incomplete_silence_ms`; `smart_turn=False` for the
+plain 700 ms rule). If you have the caller's transcript, pass it with
+`session.push_transcript(text)` (server: `{"type": "transcript", "text": ...}`): a turn whose
+text ends on a word no sentence can end on ("...a flight to", "um", Arabic "يعني") waits
+longer. Lab results and limits: `docs/E5_SPEC.md`, `docs/E5B_SPEC.md`. Interruptions are still
+rule based: a short "stop!" and a short "yeah" look the same.
 
 A complete reference bridge (client WS -> nexora -> agent WS, with JSON events and
 automatic agent-speaking detection) is in `nexora_audio.integrations.websocket_bridge`:
@@ -124,6 +130,7 @@ with NexoraAudio(sample_rate=16000, frame_ms=10) as audio:
 | `deepfilter_speech_atten_lim_db` | `20` | Max noise removal while speaking (higher = cleaner but riskier) |
 | `pause_gate_db` | `40` | Extra attenuation in pauses |
 | `speech_guard`, `speech_guard_margin_db` | `True`, `6` | Never remove speech beyond the noise share (see step 3) |
+| `background_speech_db` | `17` | Speech this far below the caller is background (TV, babble) and removed in pauses; `None` disables |
 | `noise_cancellation_strength` / `speech_protection_strength` | `1.0` / `0.85` | Same idea for the RNNoise backend |
 | `voice_enhancement`, `clarity_db` | `True`, `3.0` | High-pass + clarity EQ + limiter |
 | `auto_gain_control` | `False` | Level speech towards `agc_target_dbfs` (-20) |
@@ -172,6 +179,33 @@ and `src/nexora_audio/_native/PROVENANCE.md`. Dependency review:
 `docs/DEPENDENCY_LICENSES.md`. The licence for nexora-audio itself has not been chosen yet.
 
 ## Quality lab
-Every audio change is measured on a 242-case test corpus (noise, phone, reverb, echo, turns,
+Every audio change is measured on a 276-case test corpus (noise, phone, reverb, echo, turns,
 packet loss) against quality gates: `python -m qualitylab run --profile fast`. See
 `docs/QUALITY_BASELINE.md` and `docs/VOICE_QUALITY_PLAN.md`.
+
+## Live calls: lost packets, Opus, quality numbers, Pipecat/Dograh
+- **Lost packets**: gaps that arrive as digital silence (what jitter buffers and gateways
+  insert) are concealed G.711-Appendix-I style: pitch repetition, fading out over 60 ms.
+  If the transport knows audio is missing, call `session.conceal(ms)`.
+  `StreamSession(loss_concealment=False)` turns it off.
+- **Opus input**: `AudioFormat("opus", 16000)`, one packet per `process()` call, `b""` for
+  a lost packet. Output is PCM16 (or float32/G.711). Needs the system `libopus`
+  (`apt install libopus0`).
+- **Per-call quality**: `session.quality()` gives speech level, noise floor, SNR, clipping,
+  concealed audio, speech-guard restorations, processing time and delay.
+- **Pipecat / Dograh**: `nexora_audio.integrations.pipecat.NexoraAudioFilter` is a Pipecat
+  audio input filter (`pip install "nexora-audio[pipecat]"`). For Dograh, see
+  `../integrations/dograh/`.
+
+## Echo (speakerphones, kiosks, cars, BYO WebSocket)
+Give the session the agent audio you send to the caller, and the agent's own voice coming
+back is no longer reported as the caller speaking or interrupting:
+
+```python
+session.push_reference(agent_audio_bytes)        # same format as the session's output
+session = StreamSession(..., echo_cancellation=True)  # also remove it (WebRTC AEC3)
+```
+
+nexora-server does this automatically in Relay mode; in Process mode send
+`{"type": "agent_audio", "data": "<base64>"}`. Results and limits: `docs/E4_SPEC.md`.
+

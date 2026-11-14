@@ -1,0 +1,14 @@
+# Helm values for prometheus-community/prometheus-adapter: exposes nexora_active_sessions
+# (summed over the "mode" label) as a per-pod custom metric for the HPA.
+#   helm install prometheus-adapter prometheus-community/prometheus-adapter -f this-file
+rules:
+  default: false
+  custom:
+    - seriesQuery: 'nexora_active_sessions{namespace!="",pod!=""}'
+      resources:
+        overrides:
+          namespace: {resource: namespace}
+          pod: {resource: pod}
+      name:
+        as: nexora_active_sessions
+      metricsQuery: 'sum(<<.Series>>{<<.LabelMatchers>>}) by (<<.GroupBy>>)'

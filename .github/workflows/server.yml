@@ -1,0 +1,93 @@
+name: server
+
+# nexora-server (+ nexora-client): lint, types, tests, migrations on real PostgreSQL,
+# Kubernetes manifest validation.
+
+on:
+  pull_request:
+    paths: ["nexora-server/**", "nexora-client/**", "nexora-audio/src/**", "deploy/**",
+            ".github/workflows/server.yml"]
+  push:
+    branches: [main]
+    paths: ["nexora-server/**", "nexora-client/**", "nexora-audio/src/**", "deploy/**",
+            ".github/workflows/server.yml"]
+  workflow_dispatch:
+
+defaults:
+  run:
+    working-directory: nexora-server
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: nexora
+          POSTGRES_PASSWORD: nexora
+          POSTGRES_DB: nexora_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U nexora" --health-interval 5s --health-retries 10
+    env:
+      NEXORA_TEST_POSTGRES_URL: postgresql+psycopg://nexora:nexora@localhost:5432/nexora_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install
+        run: |
+          sudo apt-get install -y --no-install-recommends libopus0
+          pip install -e ../nexora-audio -e ../nexora-client -e ".[dev,postgres,redis]"
+      - name: Lint and types
+        run: |
+          ruff check src tests ../nexora-client/src
+          ruff format --check src tests ../nexora-client/src
+          mypy src ../nexora-client/src
+      - name: Accessibility checker for the dashboard test
+        run: npm install --prefix "$RUNNER_TEMP/axe" --no-audit --no-fund axe-core@4
+      - name: Tests
+        env:
+          NEXORA_AXE_JS: ${{ runner.temp }}/axe/node_modules/axe-core/axe.min.js
+        run: pytest -q
+
+  # The Kubernetes manifests on a real (kind) cluster: read-only pods become ready,
+  # migrations run in the init container, org limits hold across pods via Redis, a
+  # draining pod finishes its call, a killed pod's call is swept (deploy/k8s-ci/smoke.py)
+  kind:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the server image
+        run: docker build -f deploy/server.Dockerfile -t nexora-server:ci .
+      - uses: helm/kind-action@v1
+        with:
+          cluster_name: nexora
+      - name: Deploy
+        run: |
+          kind load docker-image nexora-server:ci --name nexora
+          kubectl apply -k deploy/k8s-ci
+          kubectl -n nexora rollout status deploy/nexora-postgres --timeout=5m
+          kubectl -n nexora rollout status deploy/nexora-redis --timeout=5m
+          kubectl -n nexora rollout status deploy/nexora-server --timeout=15m
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Real-cluster checks
+        run: |
+          pip install httpx websockets numpy
+          python deploy/k8s-ci/smoke.py
+      - name: Cluster state on failure
+        if: failure()
+        run: |
+          kubectl -n nexora get pods,events -o wide || true
+          kubectl -n nexora describe pods -l app.kubernetes.io/name=nexora-server | tail -80 || true
+          kubectl -n nexora logs -l app.kubernetes.io/name=nexora-server --all-containers --tail=80 --prefix || true

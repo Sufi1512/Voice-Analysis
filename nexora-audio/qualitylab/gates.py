@@ -56,6 +56,8 @@ def _select(rows: list[dict[str, Any]], g: dict[str, Any]) -> list[dict[str, Any
             continue
         if "kind" in g and r.get("kind") != g["kind"]:
             continue
+        if "lang" in g and r.get("lang") != g["lang"]:
+            continue
         if "loss_pct" in g and r.get("loss_pct") != g["loss_pct"]:
             continue
         out.append(r)

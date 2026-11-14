@@ -1,0 +1,14 @@
+--- a/src/arm64.rs
++++ b/src/arm64.rs
+@@ -95,7 +95,10 @@
+ 
+ #[cfg(target_os = "macos")]
+ pub fn has_amx() -> bool {
+-    true
++    // Nexora build patch: AMX is undocumented and absent in virtual machines (and so in
++    // CI), where it is an illegal instruction. Off unless TRACT_APPLE_AMX=1; the NEON
++    // kernels run everywhere.
++    std::env::var("TRACT_APPLE_AMX").map(|v| v == "1").unwrap_or(false)
+ }
+ 
+ #[cfg(all(target_os = "ios", feature = "apple-amx-ios"))]

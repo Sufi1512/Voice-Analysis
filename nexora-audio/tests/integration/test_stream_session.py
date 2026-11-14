@@ -8,7 +8,8 @@ import pytest
 from scipy.signal import resample_poly
 
 from nexora_audio import AudioFormat, ConfigurationError, StreamSession, TurnConfig
-from nexora_audio.streaming.codecs import encode
+from nexora_audio.streaming.codecs import StreamDecoder, encode
+from nexora_audio.streaming.opus import probe as opus_probe
 from tests.audio_fixtures import mix, speech, white
 
 PCM16 = AudioFormat("pcm16", 16000)
@@ -60,6 +61,16 @@ def test_telephony_8k(enc: str) -> None:
         audio, events = run(s, data)
     assert len(audio) >= len(data)
     assert {"speech_start", "end_of_turn"} <= {e.type for e in events}
+    # Smart Turn judged the pauses on the resampled (8 -> 16 kHz) caller audio
+    assert any("complete_probability" in e.data for e in events if e.type == "end_of_turn")
+
+
+def test_smart_turn_can_be_turned_off() -> None:
+    data = padded_speech_bytes(PCM16)
+    with StreamSession(input_format=PCM16, turns=TurnConfig(smart_turn=False)) as s:
+        _, events = run(s, data)
+    eots = [e for e in events if e.type == "end_of_turn"]
+    assert eots and all("complete_probability" not in e.data for e in eots)
 
 
 def test_output_format_conversion() -> None:
@@ -126,3 +137,45 @@ def test_concurrent_sessions_are_independent() -> None:
     with concurrent.futures.ThreadPoolExecutor(4) as ex:
         parallel = list(ex.map(one, inputs))
     assert parallel == sequential
+
+
+def test_conceal_keeps_time_and_quality_reports() -> None:
+    fmt = AudioFormat("pcm16", 16000)
+    data = padded_speech_bytes(fmt)
+    step = fmt.bytes_for_ms(20)
+    out = bytearray()
+    with StreamSession(input_format=fmt, turns=None) as s:
+        for k, i in enumerate(range(0, len(data), step)):
+            if k == 200:  # transport says this packet is missing: send nothing, conceal it
+                out += s.conceal(20).audio
+                continue
+            out += s.process(data[i : i + step]).audio
+        out += s.flush().audio
+        q = s.quality()
+    # concealing instead of dropping keeps the stream aligned: same length as a full stream
+    # (flush() adds the delayed tail plus frame padding, under 100 ms)
+    assert 0 <= len(out) - len(data) < fmt.bytes_for_ms(100)
+    assert q["concealed_ms"] == 20.0 and q["loss_events"] == 1
+    assert q["snr_db"] > 10  # the 1961 recording has its own crowd noise
+    assert "chunk_p99_ms" in q and q["guard_restored_frames"] >= 0
+
+
+@pytest.mark.skipif(opus_probe() is not None, reason="libopus not installed")
+def test_opus_input_session() -> None:
+    from nexora_audio.streaming.opus import OpusEncoder
+
+    pcm = AudioFormat("pcm16", 16000)
+    raw = padded_speech_bytes(pcm)
+    x = StreamDecoder(pcm).decode(raw)
+    enc = OpusEncoder(16000)
+    with StreamSession(input_format=AudioFormat("opus", 16000)) as s:
+        assert s.output_format == pcm
+        audio = bytearray()
+        events = []
+        for i in range(0, x.shape[1] - 320, 320):
+            o = s.process(enc.encode(x[:, i : i + 320]) if i // 320 != 300 else b"")
+            audio += o.audio
+            events += o.events
+        audio += s.flush().audio
+    assert {"speech_start", "end_of_turn"} <= {e.type for e in events}
+    assert abs(len(audio) - (x.shape[1] // 320) * 640) < 3200

@@ -27,12 +27,19 @@ Interactive API docs: `http://localhost:8080/docs`.
 | `NEXORA_SECRET_KEY` | random (warns) | Signs session tokens, peppers API-key hashes. **Same value on every instance** |
 | `NEXORA_ADMIN_API_KEY` | none | Super-admin key, only for creating organizations |
 | `NEXORA_DEPLOYMENT_MODE` | `saas` | `saas`: relay targets must be `wss://` public hosts. `self_hosted`: allowlist only |
-| `NEXORA_MAX_SESSIONS` | 4 × CPU cores | Instance capacity. Beyond it, connections close with 1013 |
+| `NEXORA_MAX_SESSIONS` | 2 × CPU cores | Instance capacity. Beyond it, connections close with 1013 |
 | `NEXORA_WORKER_THREADS` | CPU cores | Audio processing threads |
 | `NEXORA_IDLE_TIMEOUT_S` | 30 | Close sessions that send nothing (code 4408) |
 | `NEXORA_MAX_MESSAGE_BYTES` | 262144 | Larger audio messages close with 1009 |
 | `NEXORA_SESSION_TOKEN_TTL_S` | 300 | Default session-token lifetime |
 | `NEXORA_CORS_ORIGINS` | none | Comma-separated origins for browser REST calls |
+| `NEXORA_REDIS_URL` | none | Redis for organization limits across instances (session leases). Without it limits are per instance |
+| `NEXORA_LEASE_TTL_S` | 30 | A crashed instance's sessions stop counting after this long |
+| `NEXORA_DRAIN_TIMEOUT_S` | 600 | On SIGTERM: stop taking calls, wait this long for open ones, then exit |
+| `NEXORA_STRIPE_API_KEY` | none | Metered billing to Stripe, hourly (`docs/E9_SPEC.md`) |
+| `NEXORA_OIDC_ISSUER`, `_CLIENT_ID`, `_CLIENT_SECRET`, `_REDIRECT_URL` | none | Dashboard single sign-on (OpenID Connect) |
+| `NEXORA_SSO_SUPERADMIN_EMAILS` | none | Comma-separated emails that sign in as super-admin |
+| `NEXORA_AUTO_MIGRATE` | true | Run database migrations at start-up. Set false when a migration job runs them (`nexora-server migrate`) |
 
 ## Onboard a customer
 
@@ -123,17 +130,26 @@ async with NexoraClient("https://voice.example.com", api_key="nx_…") as nx:
 
 ## Operate it
 
+- **Admin dashboard:** `http://<server>/dashboard/` (sign in with an `admin`-scope key):
+  usage and quota, API keys, profiles, recent calls with quality, audit log; super-admins
+  also manage organizations (`docs/E8_SPEC.md`).
+
 - `GET /healthz`: liveness. `GET /readyz`: readiness (DB reachable, models loaded, capacity left).
 - `GET /metrics`: Prometheus. `nexora_active_sessions`, `nexora_capacity_sessions`,
   `nexora_sessions_total{mode,outcome}`, `nexora_rejections_total{reason}`,
   `nexora_audio_seconds_total`, `nexora_turn_events_total`,
-  `nexora_chunk_processing_seconds`, `nexora_session_start_seconds`.
+  `nexora_chunk_processing_seconds`, `nexora_session_start_seconds`, `nexora_draining`,
+  `nexora_limiter_errors_total`.
+- Deploys: SIGTERM drains (readiness 503, new calls refused with 1013, open calls finish);
+  `nexora_client` retries 1013 with backoff. Kubernetes manifests: `deploy/k8s/` (E6).
+- Database: Alembic migrations, `nexora-server migrate` (`docs/E6_SPEC.md`).
 - Logs: one JSON line per event, with `session_id` and `org_id`. Audio and keys are never logged.
 - Usage and billing: `GET /v1/usage` (audio minutes per day, month to date, quota);
   every session is recorded in `/v1/sessions`.
-- Capacity: about 4 concurrent calls per CPU core with the default pipeline
-  (`nexora-audio/docs/benchmarks.md`). Scale out by adding instances behind a
-  WebSocket-capable load balancer. The secret key and database are shared; nothing else is.
+- Capacity: about 2 real-time calls per CPU core with the full default pipeline, one
+  process per instance (measured in `docs/E10_RESULTS.md`). Beyond capacity, or when the
+  audio work queue backs up, new calls get 1013 and clients retry elsewhere. Scale out by
+  adding instances behind a WebSocket-capable load balancer.
 - Warm pool: each instance pre-loads models and keeps recently used session types ready,
   so a new call starts in milliseconds instead of ~0.5 s.
 
@@ -146,8 +162,8 @@ async with NexoraClient("https://voice.example.com", api_key="nx_…") as nx:
 - Every admin action is in the audit log (`GET /v1/audit`).
 - Runs as a non-root user in the container. TLS terminates at your load balancer.
 
-## Known limits (E1)
-- Concurrency limits are per instance (per-org counts are not shared across instances yet: E2 adds Redis).
-- Tables are created at startup. Alembic migrations come in E2.
+## Known limits
+- Open issues for every phase: `../OPEN_ISSUES.md`.
 - Tested on SQLite. PostgreSQL is supported through SQLAlchemy but not exercised in CI here.
-- Turn and interruption detection is rule-based (see nexora-audio README).
+- End of turn uses Smart Turn plus an optional transcript cue; interruptions are rule-based
+  (see nexora-audio README).

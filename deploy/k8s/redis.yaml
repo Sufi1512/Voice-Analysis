@@ -1,0 +1,56 @@
+# Single-node Redis for session leases (organization limits). NOT for production: use a
+# managed, highly available Redis and point NEXORA_REDIS_URL at it. Leases are short-lived,
+# so no persistence is needed; if Redis restarts, limits fall back per pod until leases renew.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nexora-redis
+  labels:
+    app.kubernetes.io/name: nexora-redis
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: nexora-redis
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: nexora-redis
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: redis
+          image: redis:7.4-alpine
+          args: ["--save", "", "--appendonly", "no", "--maxmemory", "128mb"]
+          ports:
+            - {name: redis, containerPort: 6379}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: ["ALL"]}
+          resources:
+            requests: {cpu: 50m, memory: 64Mi}
+            limits: {cpu: 500m, memory: 192Mi}
+          readinessProbe:
+            exec: {command: ["redis-cli", "ping"]}
+            periodSeconds: 5
+          volumeMounts:
+            - {name: data, mountPath: /data}
+      volumes:
+        - name: data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nexora-redis
+  labels:
+    app.kubernetes.io/name: nexora-redis
+spec:
+  selector:
+    app.kubernetes.io/name: nexora-redis
+  ports:
+    - {name: redis, port: 6379, targetPort: redis}

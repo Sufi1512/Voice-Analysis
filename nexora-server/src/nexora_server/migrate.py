@@ -1,0 +1,82 @@
+"""Database migrations (Alembic), run in code or with ``nexora-server migrate``."""
+
+from __future__ import annotations
+
+import logging
+
+from alembic import command
+from alembic.config import Config
+from sqlalchemy import create_engine, inspect
+
+log = logging.getLogger("nexora.migrate")
+FIRST_REVISION = "0001"
+# for databases made by create_all (no migration history): a table (or a table's column)
+# that only exists from a given revision on tells which revision the database matches.
+# Newest first.
+MARKERS: list[tuple[str, str | None, str]] = [
+    ("sessions", "heartbeat_at", "0003"),
+    ("usage_reports", None, "0002"),
+    ("organizations", None, FIRST_REVISION),
+]
+
+
+def config(url: str) -> Config:
+    cfg = Config()
+    cfg.set_main_option("script_location", "nexora_server:migrations")
+    cfg.set_main_option("sqlalchemy.url", url.replace("%", "%%"))
+    return cfg
+
+
+# PostgreSQL advisory lock id for migrations (any constant shared by every server)
+LOCK_ID = 0x4E58_4D49  # "NXMI"
+
+
+def upgrade(url: str, revision: str = "head") -> None:
+    """Bring the database to ``revision``. A database made by ``create_all`` (tables but no
+    ``alembic_version``) is stamped with the revision it matches first, not recreated.
+
+    On PostgreSQL, pods starting together (each pod's init container runs this) wait for
+    one another on an advisory lock: one migrates, the others then find nothing to do.
+    """
+    if not url.startswith("postgresql"):
+        _upgrade(url, revision)
+        return
+    from sqlalchemy import text
+
+    engine = create_engine(url)
+    try:
+        with engine.connect() as lock:
+            lock.execute(text("SELECT pg_advisory_lock(:id)"), {"id": LOCK_ID})
+            try:
+                _upgrade(url, revision)
+            finally:
+                lock.execute(text("SELECT pg_advisory_unlock(:id)"), {"id": LOCK_ID})
+    finally:
+        engine.dispose()
+
+
+def _upgrade(url: str, revision: str) -> None:
+    cfg = config(url)
+    engine = create_engine(url)
+    try:
+        insp = inspect(engine)
+        tables = set(insp.get_table_names())
+        found = next(
+            (
+                rev
+                for table, column, rev in MARKERS
+                if table in tables
+                and (column is None or column in {c["name"] for c in insp.get_columns(table)})
+            ),
+            None,
+        )
+    finally:
+        engine.dispose()
+    if "alembic_version" not in tables and found is not None:
+        log.info("existing database without migration history: stamping %s", found)
+        command.stamp(cfg, found)
+    command.upgrade(cfg, revision)
+
+
+def downgrade(url: str, revision: str) -> None:
+    command.downgrade(config(url), revision)

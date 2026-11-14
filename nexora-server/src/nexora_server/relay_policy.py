@@ -36,13 +36,17 @@ def check_relay_target(url: str, allowlist: list[str], deployment_mode: str) -> 
     return host
 
 
-def _reject_internal(host: str, port: int) -> None:
+def _reject_internal(host: str, port: int) -> list[str]:
+    """Resolve once; refuse if any address is internal. Returns the vetted addresses."""
     try:
         infos = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
     except OSError as exc:
         raise RelayTargetError(f"cannot resolve {host!r}") from exc
+    vetted = []
     for info in infos:
-        addr = ipaddress.ip_address(info[4][0])
+        addr: ipaddress.IPv4Address | ipaddress.IPv6Address = ipaddress.ip_address(info[4][0])
+        if isinstance(addr, ipaddress.IPv6Address) and addr.ipv4_mapped is not None:
+            addr = addr.ipv4_mapped  # ::ffff:10.0.0.1 is 10.0.0.1
         if (
             addr.is_private
             or addr.is_loopback
@@ -52,3 +56,27 @@ def _reject_internal(host: str, port: int) -> None:
             or addr.is_unspecified
         ):
             raise RelayTargetError(f"{host!r} resolves to a non-public address")
+        vetted.append(str(addr))
+    return vetted
+
+
+def open_vetted_socket(
+    url: str, deployment_mode: str, timeout: float = 10.0
+) -> socket.socket | None:
+    """SaaS mode: connect a TCP socket to an address that was checked in the same step, so
+    DNS cannot change between the check and the connection (DNS rebinding). Self-hosted
+    mode: None (connect normally)."""
+    if deployment_mode != "saas":
+        return None
+    parts = urlsplit(url)
+    host, port = (
+        (parts.hostname or "").lower(),
+        parts.port or (443 if parts.scheme == "wss" else 80),
+    )
+    last: OSError | None = None
+    for addr in _reject_internal(host, port):
+        try:
+            return socket.create_connection((addr, port), timeout=timeout)
+        except OSError as exc:
+            last = exc
+    raise RelayTargetError(f"cannot connect to {host!r}: {last}")

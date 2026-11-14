@@ -1,0 +1,23 @@
+# Only the ingress controller and Prometheus may connect to the server pods. Required with
+# NEXORA_FORWARDED_ALLOW_IPS="*": otherwise anything in the cluster could set
+# X-Forwarded-For and dodge the per-IP connection limit. Rename the namespaces if your
+# ingress controller or Prometheus live elsewhere. Needs a CNI that enforces policies.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: nexora-server
+  labels:
+    app.kubernetes.io/name: nexora-server
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: nexora-server
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: ingress-nginx}
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: monitoring}
+      ports:
+        - {port: http}

@@ -1,0 +1,96 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nexora-server
+  labels:
+    app.kubernetes.io/name: nexora-server
+spec:
+  replicas: 2
+  revisionHistoryLimit: 5
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: nexora-server
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0  # never drop below the current capacity during a rollout
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: nexora-server
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+        prometheus.io/path: /metrics
+    spec:
+      # SIGTERM starts a drain: no new sessions, open calls finish (NEXORA_DRAIN_TIMEOUT_S=600)
+      terminationGracePeriodSeconds: 660
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile: {type: RuntimeDefault}
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: nexora-server
+      # migrations run before every pod starts, so a new image never needs a separate Job
+      # (Jobs are immutable). Pods starting together wait on a PostgreSQL advisory lock;
+      # migrations must stay compatible with the previous release still running.
+      initContainers:
+        - name: migrate
+          image: nexora-server
+          command: ["nexora-server", "migrate"]
+          envFrom:
+            - configMapRef: {name: nexora-config}
+            - secretRef: {name: nexora-secrets}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: ["ALL"]}
+          resources:
+            requests: {cpu: 100m, memory: 256Mi}
+            limits: {cpu: "1", memory: 512Mi}
+          volumeMounts:
+            - {name: tmp, mountPath: /tmp}
+      containers:
+        - name: server
+          image: nexora-server
+          ports:
+            - {name: http, containerPort: 8080}
+          envFrom:
+            - configMapRef: {name: nexora-config}
+            - secretRef: {name: nexora-secrets}
+          resources:
+            requests: {cpu: "4", memory: 3Gi}
+            limits: {cpu: "4", memory: 4Gi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: ["ALL"]}
+          startupProbe:  # models load before the first ready
+            httpGet: {path: /healthz, port: http}
+            periodSeconds: 2
+            failureThreshold: 60
+          readinessProbe:  # 503 while starting, full or draining
+            httpGet: {path: /readyz, port: http}
+            periodSeconds: 3
+            failureThreshold: 1
+          livenessProbe:
+            httpGet: {path: /healthz, port: http}
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 6
+          lifecycle:
+            preStop:  # let the endpoint removal reach the load balancers first
+              exec: {command: ["sleep", "5"]}
+          volumeMounts:
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - name: tmp
+          emptyDir: {}

@@ -1,0 +1,20 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nexora-config
+  labels:
+    app.kubernetes.io/name: nexora-server
+data:
+  NEXORA_DEPLOYMENT_MODE: saas
+  NEXORA_MAX_SESSIONS: "8"         # per pod: ~2 calls per CPU core (E10_RESULTS.md)
+  NEXORA_WORKER_THREADS: "4"
+  NEXORA_REDIS_URL: redis://nexora-redis:6379/0
+  NEXORA_LEASE_TTL_S: "30"
+  NEXORA_DRAIN_TIMEOUT_S: "600"    # keep below terminationGracePeriodSeconds (660)
+  NEXORA_AUTO_MIGRATE: "false"     # each pod's init container migrates (advisory lock)
+  # the client IP for per-IP connection limits comes from the ingress's X-Forwarded-For;
+  # safe because networkpolicy.yaml lets only the ingress (and Prometheus) reach the pods
+  NEXORA_FORWARDED_ALLOW_IPS: "*"
+  NEXORA_CONNECT_RATE_PER_IP: "20"  # new calls per second per caller IP (burst 100)
+  NEXORA_LOG_LEVEL: INFO
+  OMP_NUM_THREADS: "1"

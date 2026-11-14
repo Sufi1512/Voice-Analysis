@@ -13,14 +13,19 @@ dependencies = [
   "fastapi>=0.115",
   "uvicorn[standard]>=0.30",
   "sqlalchemy>=2.0",
-  "pyjwt>=2.8",
+  "pyjwt[crypto]>=2.8",
   "prometheus-client>=0.20",
   "websockets>=12",
+  "alembic>=1.13",
 ]
 
 [project.optional-dependencies]
 postgres = ["psycopg[binary]>=3.1"]
-dev = ["pytest>=8", "httpx>=0.27", "ruff>=0.6", "mypy>=1.10", "soundfile>=0.12", "scipy-stubs"]
+redis = ["redis>=5"]
+dev = [
+  "pytest>=8", "httpx>=0.27", "ruff>=0.6", "mypy>=1.10", "soundfile>=0.12", "scipy-stubs",
+  "redis>=5", "fakeredis[lua]>=2.20", "kubernetes-validate>=1.30", "pyyaml>=6",
+]
 
 [project.scripts]
 nexora-server = "nexora_server.__main__:main"

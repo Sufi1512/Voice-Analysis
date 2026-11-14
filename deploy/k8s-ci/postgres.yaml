@@ -1,0 +1,37 @@
+# CI only: a throwaway PostgreSQL (no persistence, trust auth inside the cluster).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nexora-postgres
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app.kubernetes.io/name: nexora-postgres}
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: nexora-postgres}
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          env:
+            - {name: POSTGRES_USER, value: nexora}
+            - {name: POSTGRES_PASSWORD, value: nexora}
+            - {name: POSTGRES_DB, value: nexora}
+          ports:
+            - {name: pg, containerPort: 5432}
+          readinessProbe:
+            exec: {command: ["pg_isready", "-U", "nexora"]}
+            periodSeconds: 2
+          resources:
+            requests: {cpu: 100m, memory: 128Mi}
+            limits: {cpu: "1", memory: 512Mi}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nexora-postgres
+spec:
+  selector: {app.kubernetes.io/name: nexora-postgres}
+  ports:
+    - {name: pg, port: 5432, targetPort: pg}

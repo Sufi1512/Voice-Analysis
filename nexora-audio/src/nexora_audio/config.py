@@ -79,6 +79,16 @@ class NexoraConfig(BaseModel):
         le=30.0,
         description="Extra removal the speech guard allows beyond the noise share, dB.",
     )
+    background_speech_db: float | None = Field(
+        17.0,
+        ge=3.0,
+        le=40.0,
+        description=(
+            "Speech this many dB below the caller's level is treated as background talk "
+            "(TV, colleagues, announcements) and removed in pauses; None disables "
+            "(DeepFilterNet3; needs speech_protection)."
+        ),
+    )
     noise_backend: NoiseBackend = "auto"
     voice_isolation: bool = False
     echo_cancellation: bool = False

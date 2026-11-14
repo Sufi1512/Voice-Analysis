@@ -1,0 +1,19 @@
+[package]
+name = "nexora_aec"
+version = "0.1.0"
+edition = "2021"
+license = "BSD-3-Clause"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+webrtc-audio-processing = { version = "=2.1.0", features = ["bundled", "experimental-aec3-config"] }
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+
+[build-dependencies]
+cc = "1"
