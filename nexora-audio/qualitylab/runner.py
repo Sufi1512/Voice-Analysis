@@ -19,6 +19,22 @@ CHUNK_MS = 20
 STT_DELAY_S = 0.3  # a streaming STT's final arrives about this long into a pause
 
 
+_FROZEN: dict[str, list[list[Any]]] | None = None
+
+
+def _frozen_transcripts() -> dict[str, list[list[Any]]]:
+    """``turn_transcripts.json``: Whisper tiny.en's text for each turn case, made once
+    (2026-11-14) so the text cue sees identical words on every machine."""
+    global _FROZEN
+    if _FROZEN is None:
+        import json
+        from pathlib import Path
+
+        f = Path(__file__).with_name("turn_transcripts.json")
+        _FROZEN = json.loads(f.read_text()) if f.exists() else {}
+    return _FROZEN
+
+
 def turn_transcripts(case: Case) -> list[tuple[float, str]]:
     """(time, text) a streaming STT would send for a turn case: the caller's words up to
     each pause and up to the true end, STT_DELAY_S after the speech stops. Whisper tiny.en
@@ -27,6 +43,9 @@ def turn_transcripts(case: Case) -> list[tuple[float, str]]:
 
     if "texts" in case.labels:  # scripted (synthetic) speech: the text is known
         return [(t + STT_DELAY_S, text) for t, text in case.labels["texts"]]
+    frozen = _frozen_transcripts().get(case.id)
+    if frozen is not None:  # same text on every machine (Whisper varies across CPUs)
+        return [(float(t), str(text)) for t, text in frozen]
     rate = case.rate
     points = [a for a, _ in case.labels["pauses"]] + [case.labels["true_end"]]
     out = []

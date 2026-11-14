@@ -27,6 +27,11 @@ through each telephony provider, real speakerphone echo recordings, Arabic and o
 launch languages, real music. Synthetic English and Arabic calls (above) stand in for some
 of this, with the limits in `docs/E5B_SPEC.md`.
 
+**Frozen transcripts** (`turn_transcripts.json`): Whisper tiny.en's text of the speech before
+each pause in the turn cases, generated once and committed, because Whisper's output differs
+slightly between CPU models and the text cue would otherwise change the turn results from
+machine to machine. Regenerate it if the turn cases change.
+
 **Synthetic calls** (`turns_tts`, 50 cases): needs a separate environment with
 `sherpa-onnx==1.12.40` (2.x dropped the espeak front end), then
 `python -I qualitylab/tts_gen.py qualitylab/.cache/tts` after downloading the three
