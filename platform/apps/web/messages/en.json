@@ -1,0 +1,205 @@
+{
+  "brand": {
+    "name": "NEXORA",
+    "tagline": "Voice agents and AI workflows, one control room"
+  },
+  "meta": {
+    "title": "NEXORA",
+    "titleTemplate": "{page} · NEXORA"
+  },
+  "nav": {
+    "main": "Main",
+    "operate": "Operate",
+    "govern": "Govern",
+    "platform": "Platform",
+    "overview": "Overview",
+    "auditLog": "Audit log",
+    "settings": "Organization settings",
+    "organizations": "Organizations",
+    "openMenu": "Open navigation",
+    "closeMenu": "Close navigation",
+    "skipToContent": "Skip to content"
+  },
+  "orgSwitcher": {
+    "label": "Organization",
+    "change": "Change organization, current: {name}",
+    "yourRole": "Your role: {role}",
+    "none": "No organization"
+  },
+  "user": {
+    "menu": "Account menu for {name}",
+    "signedInAs": "Signed in as",
+    "signOut": "Sign out",
+    "signOutEverywhere": "Sign out on all devices",
+    "themeDark": "Dark theme",
+    "themeLight": "Light theme",
+    "switchToLight": "Switch to light theme",
+    "switchToDark": "Switch to dark theme"
+  },
+  "roles": {
+    "platform_owner": "Platform owner",
+    "org_owner": "Organization owner",
+    "org_admin": "Organization admin",
+    "workspace_admin": "Workspace admin",
+    "developer": "Developer",
+    "operator": "Operator",
+    "viewer": "Viewer"
+  },
+  "status": {
+    "good": "Healthy",
+    "degraded": "Degraded",
+    "down": "Not reachable",
+    "unknown": "Not checked yet"
+  },
+  "common": {
+    "loading": "Loading…",
+    "save": "Save changes",
+    "saving": "Saving…",
+    "saved": "Changes saved",
+    "cancel": "Cancel",
+    "close": "Close",
+    "required": "Required",
+    "tryAgain": "Try again",
+    "unexpected": "Something went wrong on our side. Try again; if it keeps happening, contact your platform owner.",
+    "networkError": "The portal can't reach NEXORA right now. Check your connection and try again.",
+    "showPassword": "Show password",
+    "hidePassword": "Hide password",
+    "dateTime": "{date, date, medium} {date, time, short}"
+  },
+  "signIn": {
+    "title": "Sign in",
+    "intro": "Use the email address your organization invited.",
+    "email": "Work email",
+    "password": "Password",
+    "submit": "Sign in",
+    "submitting": "Signing in…",
+    "invalid": "That email and password don't match an account. Check both and try again.",
+    "locked": "Too many attempts. Sign-in for this email is paused; try again in {minutes, plural, one {# minute} other {# minutes}}.",
+    "inviteOnly": "NEXORA accounts are created by invitation. If you need access, ask your organization's owner or admin.",
+    "signedOut": "You're signed out.",
+    "sessionEnded": "Your session ended. Sign in again to continue."
+  },
+  "invite": {
+    "title": "Accept your invitation",
+    "missing": "This page needs the link from your invitation email. Open the email and select the link again.",
+    "invalid": "This invitation link isn't valid. Ask the person who invited you to send a new one.",
+    "used": "This invitation has already been used or replaced by a newer one. Sign in, or ask for a new invitation.",
+    "expired": "This invitation has expired. Ask the person who invited you to send a new one.",
+    "newAccount": "Create your password to join. You'll use it with this email to sign in.",
+    "existingAccount": "Already have a NEXORA account with this email? Enter its password to join.",
+    "name": "Your name",
+    "nameHint": "Shown to your teammates.",
+    "password": "Password",
+    "passwordHint": "At least 12 characters. A short sentence works well.",
+    "passwordTooShort": "Use at least 12 characters.",
+    "wrongPassword": "That password doesn't match the account for this email.",
+    "otherAccount": "You're signed in with a different account. Sign out, then open the invitation link again.",
+    "locked": "Too many attempts for this email. Try again in 15 minutes.",
+    "submit": "Join organization",
+    "submitting": "Joining…",
+    "joined": "You've joined {organization} as {role}."
+  },
+  "overview": {
+    "title": "Overview",
+    "subtitle": "{organization}",
+    "health": "System health",
+    "healthIntro": "Checked when this page loads.",
+    "coreService": "NEXORA Core",
+    "database": "Database",
+    "checkedAt": "Checked {time}",
+    "yourAccess": "Your access",
+    "yourAccessIntro": "What your role lets you do in {organization}.",
+    "permission": {
+      "organization:read": "See the organization",
+      "organization:update": "Rename the organization and change its settings",
+      "workspace:read": "See workspaces",
+      "workspace:create": "Create workspaces",
+      "member:read": "See members and their roles",
+      "member:invite": "Invite people",
+      "member:manage": "Change members' roles and remove members",
+      "audit:read": "Read the audit log",
+      "platform:organizations": "Create and list all organizations"
+    },
+    "recentActivity": "Recent activity",
+    "viewAuditLog": "View audit log",
+    "noActivity": "Nothing has happened in this organization yet."
+  },
+  "audit": {
+    "title": "Audit log",
+    "intro": "Every change in {organization}, newest first. Entries can't be edited or deleted.",
+    "when": "When",
+    "actor": "Who",
+    "action": "What",
+    "target": "On",
+    "system": "System",
+    "you": "You",
+    "loadMore": "Show older entries",
+    "empty": "No entries yet. Changes appear here as people work.",
+    "forbidden": "Your role can't read the audit log. Ask an organization owner or admin.",
+    "actions": {
+      "organization_created": "Created the organization",
+      "organization_updated": "Changed organization settings",
+      "workspace_created": "Created a workspace",
+      "invitation_created": "Sent an invitation",
+      "invitation_accepted": "Accepted an invitation",
+      "member_added": "Added a member",
+      "other": "{action}"
+    }
+  },
+  "settings": {
+    "title": "Organization settings",
+    "intro": "Name and details of {organization}.",
+    "name": "Organization name",
+    "nameHint": "Shown in the portal and in invitation emails.",
+    "slug": "Short name",
+    "slugHint": "Used in links. Ask your platform owner to change it.",
+    "region": "Data region",
+    "regionValue": "Saudi Arabia",
+    "readOnly": "Your role can see these settings but not change them.",
+    "nameRequired": "Enter a name."
+  },
+  "platform": {
+    "title": "Organizations",
+    "intro": "Every organization on this NEXORA platform. Only the platform owner sees this page.",
+    "create": "Create organization",
+    "createTitle": "New organization",
+    "createIntro": "Creates the organization with a Production workspace and emails an invitation to its first owner.",
+    "name": "Organization name",
+    "slug": "Short name",
+    "slugHint": "2 to 63 lowercase letters, numbers or hyphens, used in links.",
+    "slugInvalid": "Use 2 to 63 lowercase letters, numbers or hyphens, not starting or ending with a hyphen.",
+    "slugTaken": "Another organization already uses this short name.",
+    "ownerEmail": "First owner's email",
+    "ownerEmailHint": "They get an invitation that works once and expires in 7 days.",
+    "emailInvalid": "Enter an email address, like name@company.sa.",
+    "emailFailed": "The invitation email couldn't be sent, so nothing was created. Check the mail server settings and try again.",
+    "submit": "Create and send invitation",
+    "submitting": "Creating…",
+    "created": "Created {name}. An invitation is on its way to {email}.",
+    "columns": {
+      "name": "Organization",
+      "slug": "Short name",
+      "members": "Members",
+      "status": "Status",
+      "created": "Created"
+    },
+    "statusValue": {
+      "active": "Active",
+      "suspended": "Suspended"
+    },
+    "empty": "No organizations yet. Create the first one to invite its owner."
+  },
+  "home": {
+    "noOrgTitle": "You're not in an organization yet",
+    "noOrgBody": "When someone invites you, the invitation email has a link to join. Ask your organization's owner or admin to invite you.",
+    "platformHint": "As platform owner, you can create the first organization.",
+    "goToPlatform": "Go to organizations"
+  },
+  "errors": {
+    "notFoundTitle": "Page not found",
+    "notFoundBody": "This page doesn't exist, or you don't have access to it.",
+    "backHome": "Back to the portal",
+    "errorTitle": "This page couldn't load",
+    "errorBody": "Something went wrong on our side. Try again; if it keeps happening, contact your platform owner."
+  }
+}

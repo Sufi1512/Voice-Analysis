@@ -1,0 +1,165 @@
+@import "tailwindcss";
+@import "@fontsource/ibm-plex-sans/400.css";
+@import "@fontsource/ibm-plex-sans/500.css";
+@import "@fontsource/ibm-plex-sans/600.css";
+@import "@fontsource/ibm-plex-sans-condensed/500.css";
+@import "@fontsource/ibm-plex-sans-condensed/600.css";
+@import "@fontsource/jetbrains-mono/400.css";
+@import "@fontsource/jetbrains-mono/500.css";
+
+/* Signal Room tokens (design canvas "Colour and motion" and "Tokens" boards).
+   Dark is the default; [data-theme="light"] is chosen by the person. Contrast of every text
+   token against canvas and panel is checked in tests/contrast.test.ts. */
+:root {
+  color-scheme: dark;
+  --nx-canvas: #0f1522;
+  --nx-sidebar: #0c111c;
+  --nx-panel: #151d2d;
+  --nx-raised: #1c2638;
+  --nx-rule: #29344a;
+  --nx-rule-soft: #222c3f;
+  --nx-control: #344058;
+  --nx-text: #e7ecf5;
+  --nx-muted: #a3aec2;
+  --nx-faint: #8a96ab;
+  --nx-action: #3563e9;
+  --nx-on-action: #ffffff;
+  --nx-link: #7fa5ff;
+  --nx-link-hover: #a9c2ff;
+  --nx-focus: #5b8dff;
+  --nx-voice: #f2b544;
+  --nx-ai: #b49cff;
+  --nx-knowledge: #7fa5ff;
+  --nx-good: #3fcf8e;
+  --nx-warn: #ff9a5c;
+  --nx-running: #7fa5ff;
+  --nx-critical: #ff6b78;
+  --nx-avatar: #243153;
+  --nx-avatar-text: #a9c2ff;
+}
+
+[data-theme="light"] {
+  color-scheme: light;
+  --nx-canvas: #f4f6fa;
+  --nx-sidebar: #edf1f7;
+  --nx-panel: #ffffff;
+  --nx-raised: #ebeff5;
+  --nx-rule: #dce2ec;
+  --nx-rule-soft: #e6ebf2;
+  --nx-control: #c3ccda;
+  --nx-text: #121a2b;
+  --nx-muted: #4b566a;
+  --nx-faint: #5d687c;
+  --nx-action: #2d58d6;
+  --nx-on-action: #ffffff;
+  --nx-link: #2d58d6;
+  --nx-link-hover: #1f43ad;
+  --nx-focus: #2d58d6;
+  --nx-voice: #8c5b00;
+  --nx-ai: #6a4bd8;
+  --nx-knowledge: #2d58d6;
+  --nx-good: #0f7a55;
+  --nx-warn: #a84b18;
+  --nx-running: #2d58d6;
+  --nx-critical: #c42b3b;
+  --nx-avatar: #dbe5fb;
+  --nx-avatar-text: #1f43ad;
+}
+
+@theme inline {
+  --color-canvas: var(--nx-canvas);
+  --color-sidebar: var(--nx-sidebar);
+  --color-panel: var(--nx-panel);
+  --color-raised: var(--nx-raised);
+  --color-rule: var(--nx-rule);
+  --color-rule-soft: var(--nx-rule-soft);
+  --color-control: var(--nx-control);
+  --color-text: var(--nx-text);
+  --color-muted: var(--nx-muted);
+  --color-faint: var(--nx-faint);
+  --color-action: var(--nx-action);
+  --color-on-action: var(--nx-on-action);
+  --color-link: var(--nx-link);
+  --color-link-hover: var(--nx-link-hover);
+  --color-focus: var(--nx-focus);
+  --color-voice: var(--nx-voice);
+  --color-ai: var(--nx-ai);
+  --color-knowledge: var(--nx-knowledge);
+  --color-good: var(--nx-good);
+  --color-warn: var(--nx-warn);
+  --color-running: var(--nx-running);
+  --color-critical: var(--nx-critical);
+  --color-avatar: var(--nx-avatar);
+  --color-avatar-text: var(--nx-avatar-text);
+
+  --font-sans: "IBM Plex Sans", system-ui, sans-serif;
+  --font-display: "IBM Plex Sans Condensed", "IBM Plex Sans", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+
+  --radius-control: 6px;
+  --radius-panel: 10px;
+
+  /* Motion: 120 hover/press, 200 menus/tabs/toasts, 320 panels/new rows; one ease-out. */
+  --ease-signal: cubic-bezier(0.2, 0, 0, 1);
+}
+
+@layer base {
+  html {
+    background: var(--nx-canvas);
+    color: var(--nx-text);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+  body {
+    margin: 0;
+    min-height: 100dvh;
+  }
+  a {
+    color: var(--nx-link);
+    text-decoration: none;
+  }
+  a:hover {
+    color: var(--nx-link-hover);
+  }
+  /* Focus ring: 2 px ion blue, always visible on keyboard focus. */
+  :focus-visible {
+    outline: 2px solid var(--nx-focus);
+    outline-offset: 2px;
+  }
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+@keyframes nx-rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes nx-pulse {
+  from {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--nx-voice) 55%, transparent);
+  }
+  to {
+    box-shadow: 0 0 0 9px transparent;
+  }
+}
+.nx-rise {
+  animation: nx-rise 320ms var(--ease-signal) both;
+}
+.nx-live {
+  animation: nx-pulse 1.6s ease-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition-duration: 0ms !important;
+  }
+}
