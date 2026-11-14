@@ -299,3 +299,20 @@ def test_migrations_on_postgres() -> None:
     assert diff == []
     downgrade(url, "base")
     upgrade(url)
+
+
+def test_pods_migrating_at_once_on_postgres() -> None:
+    """Every pod's init container migrates; the advisory lock lets one do it at a time."""
+    import os
+    from concurrent.futures import ThreadPoolExecutor
+
+    url = os.environ.get("NEXORA_TEST_POSTGRES_URL")
+    if not url:
+        pytest.skip("NEXORA_TEST_POSTGRES_URL not set")
+    from nexora_server.migrate import downgrade, upgrade
+
+    downgrade(url, "base")
+    with ThreadPoolExecutor(4) as pool:
+        for f in [pool.submit(upgrade, url) for _ in range(4)]:
+            f.result()  # without the lock they deadlock or fail on "already exists"
+    assert _version(url) == "0003"

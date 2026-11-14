@@ -60,7 +60,10 @@ def test_drain_fits_in_the_grace_period() -> None:
     drain = float(cfg["NEXORA_DRAIN_TIMEOUT_S"])
     assert spec["terminationGracePeriodSeconds"] >= drain + pre_stop + margin
     assert dep["spec"]["strategy"]["rollingUpdate"]["maxUnavailable"] == 0
-    assert cfg["NEXORA_AUTO_MIGRATE"] == "false"  # the Job migrates, not every replica
+    assert cfg["NEXORA_AUTO_MIGRATE"] == "false"  # the init container migrates
+    (init,) = spec["initContainers"]
+    assert init["command"] == ["nexora-server", "migrate"]
+    assert init["image"] == spec["containers"][0]["image"]  # same release as the server
 
 
 def test_hpa_targets_sessions_below_capacity() -> None:
@@ -78,7 +81,7 @@ def test_containers_run_locked_down() -> None:
             continue
         pod = o["spec"]["template"]["spec"]
         assert pod["securityContext"]["runAsNonRoot"] is True
-        for c in pod["containers"]:
+        for c in pod["containers"] + pod.get("initContainers", []):
             sc = c["securityContext"]
             assert sc["readOnlyRootFilesystem"] and not sc["allowPrivilegeEscalation"]
             assert "limits" in c["resources"]

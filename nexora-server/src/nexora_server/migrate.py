@@ -27,9 +27,35 @@ def config(url: str) -> Config:
     return cfg
 
 
+# PostgreSQL advisory lock id for migrations (any constant shared by every server)
+LOCK_ID = 0x4E58_4D49  # "NXMI"
+
+
 def upgrade(url: str, revision: str = "head") -> None:
     """Bring the database to ``revision``. A database made by ``create_all`` (tables but no
-    ``alembic_version``) is stamped with the revision it matches first, not recreated."""
+    ``alembic_version``) is stamped with the revision it matches first, not recreated.
+
+    On PostgreSQL, pods starting together (each pod's init container runs this) wait for
+    one another on an advisory lock: one migrates, the others then find nothing to do.
+    """
+    if not url.startswith("postgresql"):
+        _upgrade(url, revision)
+        return
+    from sqlalchemy import text
+
+    engine = create_engine(url)
+    try:
+        with engine.connect() as lock:
+            lock.execute(text("SELECT pg_advisory_lock(:id)"), {"id": LOCK_ID})
+            try:
+                _upgrade(url, revision)
+            finally:
+                lock.execute(text("SELECT pg_advisory_unlock(:id)"), {"id": LOCK_ID})
+    finally:
+        engine.dispose()
+
+
+def _upgrade(url: str, revision: str) -> None:
     cfg = config(url)
     engine = create_engine(url)
     try:

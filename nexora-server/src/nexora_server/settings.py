@@ -58,7 +58,7 @@ class Settings(BaseModel):
         "only when nothing but the load balancer can reach the server).",
     )
     auto_migrate: bool = Field(
-        True, description="Run database migrations at start-up (false with a migration Job)."
+        True, description="Run database migrations at start-up (false: an init container does)."
     )
     # single sign-on for the dashboard (OpenID Connect); empty issuer: off
     oidc_issuer: str = ""

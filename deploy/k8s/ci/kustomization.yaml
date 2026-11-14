@@ -1,0 +1,36 @@
+# CI only: the production manifests (..) on a throwaway kind cluster, with small pods, a
+# throwaway PostgreSQL, fast checkpoints and no autoscaler. Driven by smoke.py.
+# The secret values below are dummy test values for this disposable cluster only.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: nexora
+resources:
+  - ..
+  - postgres.yaml
+secretGenerator:
+  - name: nexora-secrets
+    options: {disableNameSuffixHash: true}
+    literals:
+      - NEXORA_SECRET_KEY=ci-only-secret-0123456789abcdef0123456789abcdef
+      - NEXORA_ADMIN_API_KEY=ci-only-admin-key
+      - NEXORA_DATABASE_URL=postgresql+psycopg://nexora:nexora@nexora-postgres:5432/nexora
+images:
+  - name: nexora-server
+    newName: nexora-server
+    newTag: ci
+patches:
+  - path: server-patch.yaml
+  - patch: |-
+      apiVersion: v1
+      kind: ConfigMap
+      metadata: {name: nexora-config}
+      data:
+        NEXORA_MAX_SESSIONS: "3"
+        NEXORA_WORKER_THREADS: "1"
+        NEXORA_CHECKPOINT_INTERVAL_S: "2"
+        NEXORA_STALE_SESSION_AFTER_S: "8"
+  - patch: |-
+      $patch: delete
+      apiVersion: autoscaling/v2
+      kind: HorizontalPodAutoscaler
+      metadata: {name: nexora-server}

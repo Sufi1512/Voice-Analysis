@@ -11,7 +11,7 @@ data:
   NEXORA_REDIS_URL: redis://nexora-redis:6379/0
   NEXORA_LEASE_TTL_S: "30"
   NEXORA_DRAIN_TIMEOUT_S: "600"    # keep below terminationGracePeriodSeconds (660)
-  NEXORA_AUTO_MIGRATE: "false"     # the migration Job runs them, so replicas never race
+  NEXORA_AUTO_MIGRATE: "false"     # each pod's init container migrates (advisory lock)
   # the client IP for per-IP connection limits comes from the ingress's X-Forwarded-For;
   # safe because networkpolicy.yaml lets only the ingress (and Prometheus) reach the pods
   NEXORA_FORWARDED_ALLOW_IPS: "*"

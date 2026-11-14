@@ -39,6 +39,25 @@ spec:
           labelSelector:
             matchLabels:
               app.kubernetes.io/name: nexora-server
+      # migrations run before every pod starts, so a new image never needs a separate Job
+      # (Jobs are immutable). Pods starting together wait on a PostgreSQL advisory lock;
+      # migrations must stay compatible with the previous release still running.
+      initContainers:
+        - name: migrate
+          image: nexora-server
+          command: ["nexora-server", "migrate"]
+          envFrom:
+            - configMapRef: {name: nexora-config}
+            - secretRef: {name: nexora-secrets}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: ["ALL"]}
+          resources:
+            requests: {cpu: 100m, memory: 256Mi}
+            limits: {cpu: "1", memory: 512Mi}
+          volumeMounts:
+            - {name: tmp, mountPath: /tmp}
       containers:
         - name: server
           image: nexora-server

@@ -52,7 +52,7 @@ Namespace, ConfigMap, Secret template (no values), Deployment (probes, resources
 non-root, read-only root file system, drain settings), Service, Ingress (nginx WebSocket
 timeouts), HorizontalPodAutoscaler on **active sessions per pod** (custom metric
 `nexora_active_sessions` via prometheus-adapter, rule included) with CPU as a second
-metric, PodDisruptionBudget (`maxUnavailable: 1`), migration Job,
+metric, PodDisruptionBudget (`maxUnavailable: 1`), migrations (an init container per pod since the bug round; a Job before),
 and a single-node Redis for non-production use (production: a managed Redis).
 Validated offline against the Kubernetes 1.30 schemas in tests.
 

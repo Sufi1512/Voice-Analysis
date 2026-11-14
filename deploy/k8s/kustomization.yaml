@@ -7,7 +7,6 @@ namespace: nexora
 resources:
   - namespace.yaml
   - configmap.yaml
-  - migrate-job.yaml
   - deployment.yaml
   - service.yaml
   - ingress.yaml
