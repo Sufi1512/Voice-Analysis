@@ -29,6 +29,13 @@ Choices made while building P1 tickets that the spec leaves open. Same format as
 | D22 | C8 | Invitation lookup by token uses a SECURITY DEFINER function (exact SHA-256 match), not the BYPASSRLS role. | As D13. |
 | D23 | C8 | Unit tests use an in-process SMTP server (aiosmtpd, real protocol); CI also runs Mailpit (`axllent/mailpit:v1.20.0`) with a delivery test. Docker Hub is not reachable from the development workspace. | "Mailpit in tests" where Mailpit can run; the SMTP code path is tested everywhere. |
 | D24 | C8 | Production refuses `smtp_security = none` (STARTTLS or TLS required); header values from data (organization names) are stripped of CR/LF. | No plaintext credentials or mail in production; no header injection. |
+| D25 | W1 | Portal built before C9-C13 at the user's direction (2026-11-14). Screens exist only for endpoints that exist: Members, Workspaces, MFA and password reset screens follow their Core tickets. | No screen calls an API that isn't built. |
+| D26 | W1 | The browser talks only to the portal's origin: `/v1/*` is proxied to Core (Next rewrites), server components call Core directly with the visitor's cookies. | Session and CSRF cookies stay first-party `__Host-` cookies; no CORS. |
+| D27 | W1 | Fonts self-hosted (fontsource: IBM Plex Sans, Plex Sans Condensed, JetBrains Mono); no third-party requests. | Data and traffic stay in the Kingdom; IBM Plex Sans Arabic is available the same way. |
+| D28 | W1 | Contrast is a test: every text token >= 4.5:1 on every surface in both themes. Changed from the canvas to pass: dark faint `#8a96ab` (canvas `#7B879C`, 4.18:1 on raised), light voice `#8c5b00`, good `#0f7a55`, warning `#a84b18`. | WCAG 2.2 AA in both themes (spec NFR). |
+| D29 | W1 | Lint enforces RTL readiness and translation: local ESLint rules for physical left/right classes and style props (each finding names the logical class) and for literal user-facing attributes, plus `react/jsx-no-literals`; a test scans stylesheets for physical properties; a test forbids dotted message keys. | AC-9b as a build failure, not a review comment. |
+| D30 | W2 | The invitation page reads its token from the URL fragment once in the browser and removes it from the address bar and history; the page sends `Referrer-Policy: no-referrer` (also set site-wide). | The token never reaches server logs, history or Referer headers. |
+| D31 | W1 | Theme: dark by default, light by choice in the account menu, stored in a cookie read by the server (no flash). | Signal Room's default is dark. |
 
 Known limit: anyone who knows an email can lock it for 15 minutes by failing 10 sign-ins. This is
 inherent to the lockout the spec requires (AC-3); the generic error keeps it from revealing whether the

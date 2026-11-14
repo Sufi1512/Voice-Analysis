@@ -108,6 +108,7 @@ async def test_login_sets_hardened_cookies_and_me_works(app):
         me = await c.get("/v1/me")
         assert me.status_code == 200
         assert me.json()["user"]["id"] == "usr_a"
+        assert me.json()["is_platform_owner"] is False
 
 
 async def test_session_id_is_stored_hashed(app, migrated):

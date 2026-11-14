@@ -120,8 +120,17 @@ async def logout_all(session: CurrentSession, conn: Conn, at: Now, response: Res
 @router.get("/me")
 async def me(session: CurrentSession, conn: Conn) -> dict:
     user = (
-        (await conn.execute(text("SELECT id, email, name FROM users WHERE id = :i"), {"i": session.user_id}))
+        (
+            await conn.execute(
+                text("SELECT id, email, name, is_platform_owner FROM users WHERE id = :i"),
+                {"i": session.user_id},
+            )
+        )
         .mappings()
         .one()
     )
-    return {"user": dict(user), "mfa_passed": session.mfa_passed_at is not None}
+    return {
+        "user": {"id": user["id"], "email": user["email"], "name": user["name"]},
+        "is_platform_owner": user["is_platform_owner"],
+        "mfa_passed": session.mfa_passed_at is not None,
+    }

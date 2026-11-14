@@ -1,0 +1,48 @@
+name: platform-web
+
+# NEXORA portal (platform/apps/web): lint (RTL and translation rules), types, tests, build.
+# Linux only. Nothing is pushed anywhere.
+
+on:
+  push:
+    branches: [main]
+    paths: ["platform/apps/web/**", ".github/workflows/platform-web.yml"]
+  pull_request:
+    paths: ["platform/apps/web/**", ".github/workflows/platform-web.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: platform-web-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  web:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: platform/apps/web
+    env:
+      NEXT_TELEMETRY_DISABLED: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: platform/apps/web/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: platform/apps/web/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - name: Lint (RTL and translation rules included)
+        run: pnpm lint
+      - name: Types
+        run: pnpm typecheck
+      - name: Tests
+        run: pnpm test
+      - name: Build
+        run: pnpm build
