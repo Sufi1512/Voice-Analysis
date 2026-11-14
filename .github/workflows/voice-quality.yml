@@ -104,6 +104,13 @@ jobs:
           9ebbcea30e0fbd588f7b2cb45ee897d6aeb1bf5791cbc037a7b5a3f641e3dbce vits-piper-ar_JO-kareem-medium
           VOICES
           "$RUNNER_TEMP/ttsenv/bin/python" -I qualitylab/tts_gen.py qualitylab/.cache/tts
+      - name: Cache test audio
+        uses: actions/cache@v4
+        with:
+          path: nexora-audio/qualitylab/.cache/MS-SNSD
+          key: mssnsd-${{ hashFiles('nexora-audio/qualitylab/sources.py') }}
+      - name: Fetch pinned test audio
+        run: python -m qualitylab fetch
       - name: Turn-taking gates on the synthetic calls
         run: python -m qualitylab run --profile full --only turns_tts --no-stt --out qualitylab/out/tts
       - name: With semantic transcript verdicts (report)
