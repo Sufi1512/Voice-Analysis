@@ -138,8 +138,8 @@ What this shows:
   straight back into cut-offs (table). Logged in `OPEN_ISSUES.md`; defaults unchanged.
 
 Gates: `tts_cutoff_en`, `tts_cutoff_ar` (target 3%), `tts_reply_gap_en`, `tts_reply_gap_ar`
-(target 800 ms), report-only. They only run where the synthetic set has been generated
-(not in CI).
+(target 800 ms), report-only, with the regression check against `baseline.json`. Since the
+bug round they run in CI too (`voice-quality.yml`, job `synthetic-calls`).
 
 ## Arabic reply delay: semantic end-of-utterance verdict (bug round, 2026-11-14, I-013)
 
