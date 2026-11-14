@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-ENGINE_DIR = Path(__file__).resolve().parents[1]
+ENGINE_DIR = Path(__file__).resolve().parents[2]
 FETCH = ENGINE_DIR / "fetch.sh"
 
 

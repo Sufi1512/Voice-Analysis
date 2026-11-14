@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-ENGINE_DIR = Path(__file__).resolve().parents[1]
+ENGINE_DIR = Path(__file__).resolve().parents[2]
 PLATFORM = ENGINE_DIR.parents[1]
 REPO = PLATFORM.parent
 

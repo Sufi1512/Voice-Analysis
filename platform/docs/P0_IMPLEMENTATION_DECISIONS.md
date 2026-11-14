@@ -32,7 +32,7 @@ Prove that NEXORA can change Dograh without forking it: a Dograh call pipeline r
 | D3 | The canonical patch is `platform/engines/dograh/patches/0001-nexora-noise-engine.patch`, copied unchanged from `integrations/dograh/` | P0_SPEC §1 layout. `integrations/dograh/` belongs to the audio session and is left untouched; removing the duplicate is a follow-up for whoever owns it |
 | D4 | Python 3.13, `ubuntu-latest` | Matches Dograh's `api/Dockerfile` (`python:3.13-slim`); user rule: Linux only |
 | D5 | `fetch.sh` clones over HTTPS with `--depth 1` at the pinned commits, detached, and fails if `git apply --check` fails | Read-only, reproducible, loud on upstream drift (P0_SPEC ground rules) |
-| D6 | Pipecat is installed from the pinned submodule checkout (`pip install ./pipecat[...]`) with only the extras the tests need | Dograh runs its own fork; the full extra set is large (P0_SPEC risk 3) |
+| D6 | Pipecat is installed editable from the pinned checkout with **the same extras as Dograh's Dockerfile and `scripts/setup_requirements.sh`**, plus Pipecat's dev group for test tools | Dograh's API modules import many provider services at import time, so a trimmed extra set would test a configuration Dograh never runs. Install is quick with uv's cache (P0_SPEC risk 3 handled by caching, not by trimming) |
 | D7 | Work on branch `platform/p0-foundations` with its own pull request; never push to `main` directly | Another session works in the same repository |
 | D8 | NEXORA's own tests live in `platform/engines/dograh/tests/` and are copied into the Dograh checkout's `api/tests/nexora/` at test time | They use Dograh's imports and fixtures without changing Dograh's test files beyond the patch |
 
