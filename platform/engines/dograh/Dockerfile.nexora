@@ -1,0 +1,23 @@
+# NEXORA's layer on top of the patched Dograh API image.
+#
+# Build the base first from a patched checkout (fetch.sh):
+#   docker build -f api/Dockerfile -t dograh-api:nexora-base <patched-dograh-dir>
+# then this file, with the nexora-audio wheel in the build context:
+#   docker build -f Dockerfile.nexora --build-arg BASE=dograh-api:nexora-base -t dograh-api:nexora <ctx>
+#
+# nexora-audio is installed WITHOUT its [pipecat] extra, so Dograh's Pipecat fork in the
+# base image stays in place (decision D1). Its Linux x86-64 native libraries need glibc
+# 2.35+; the base image is python:3.13-slim (Debian), which has it.
+ARG BASE=dograh-api:nexora-base
+FROM ${BASE}
+
+USER root
+COPY nexora_audio-*.whl /tmp/wheels/
+COPY nexora.env /app/nexora.env
+# Plain install: Pipecat is only in the [pipecat] extra, so it is not pulled in.
+RUN /opt/venv/bin/python -m pip install --no-cache-dir /tmp/wheels/nexora_audio-*.whl \
+ && rm -rf /tmp/wheels
+# Telemetry off by default for NEXORA deployments (P0_SPEC §2).
+ENV ENABLE_TELEMETRY=false \
+    DEPLOYMENT_MODE=oss
+USER dograh

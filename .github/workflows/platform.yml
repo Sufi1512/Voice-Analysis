@@ -1,0 +1,74 @@
+name: platform
+
+# NEXORA platform P0 (platform/docs/P0_SPEC.md): Dograh pinned and read only, NEXORA's
+# patches applied, Dograh's own tests and NEXORA's tests run against it, and the patched
+# Dograh API image built. Linux only. Nothing is pushed anywhere.
+
+on:
+  push:
+    branches: [main]
+    paths: ["platform/**", "nexora-audio/**", ".github/workflows/platform.yml"]
+  pull_request:
+    paths: ["platform/**", "nexora-audio/**", ".github/workflows/platform.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: platform-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  dograh-tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.13"}
+      - uses: astral-sh/setup-uv@v6
+        with: {enable-cache: true}
+      - name: Host-side tests (layout, fetch, settings, this workflow)
+        run: |
+          uv venv /tmp/tools && uv pip install --python /tmp/tools pytest pyyaml
+          /tmp/tools/bin/pytest -q -p no:cacheprovider platform/engines/dograh/tests/host
+      - name: Build the nexora-audio wheel
+        working-directory: nexora-audio
+        run: uv build --wheel -o "$RUNNER_TEMP/wheel"
+      - name: Fetch pinned Dograh and Pipecat, apply NEXORA's patches
+        run: platform/engines/dograh/fetch.sh "$RUNNER_TEMP/dograh"
+      - name: Dograh API environment with the wheel
+        run: platform/engines/dograh/setup.sh "$RUNNER_TEMP/dograh" "$RUNNER_TEMP/venv" "$RUNNER_TEMP"/wheel/nexora_audio-*.whl
+      - name: Dograh's tests and NEXORA's tests (including the P0 exit test)
+        run: platform/engines/dograh/run-tests.sh "$RUNNER_TEMP/dograh" "$RUNNER_TEMP/venv"
+
+  dograh-image:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - name: Fetch pinned Dograh and Pipecat, apply NEXORA's patches
+        run: platform/engines/dograh/fetch.sh "$RUNNER_TEMP/dograh"
+      - name: Build Dograh's API image from the patched tree
+        run: docker build -f "$RUNNER_TEMP/dograh/api/Dockerfile" -t dograh-api:nexora-base "$RUNNER_TEMP/dograh"
+      - name: Add nexora-audio and NEXORA's settings
+        run: |
+          mkdir -p "$RUNNER_TEMP/ctx"
+          (cd nexora-audio && uv build --wheel -o "$RUNNER_TEMP/ctx")
+          cp platform/engines/dograh/nexora.env "$RUNNER_TEMP/ctx/"
+          docker build -f platform/engines/dograh/Dockerfile.nexora --build-arg BASE=dograh-api:nexora-base \
+            -t dograh-api:nexora "$RUNNER_TEMP/ctx"
+      - name: Smoke check inside the image
+        run: |
+          docker run --rm -e DATABASE_URL=postgresql+asyncpg://d:d@localhost/d -e REDIS_URL=redis://localhost:6379/0 \
+            -e MINIO_PUBLIC_ENDPOINT=http://localhost:9000 dograh-api:nexora python -c "
+          import pathlib, pipecat, api.constants as c
+          from api.services.pipecat.noise_reduction.factory import build_audio_in_filter
+          from nexora_audio.integrations.pipecat import NexoraAudioFilter
+          f = build_audio_in_filter({'enabled': True, 'engine': 'nexora'})
+          assert isinstance(f._engine, NexoraAudioFilter), f._engine
+          assert c.ENABLE_TELEMETRY is False and c.DEPLOYMENT_MODE == 'oss'
+          print('image ok, pipecat from', pathlib.Path(pipecat.__file__).parent)
+          "
