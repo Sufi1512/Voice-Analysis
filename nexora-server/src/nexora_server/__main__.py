@@ -109,6 +109,10 @@ def main() -> None:
         # refuse oversized frames in the protocol layer, before they are buffered; JSON
         # control messages carry base64 audio (4/3 the size), hence the factor 2
         ws_max_size=2 * settings.max_message_bytes,
+        # the client IP (for per-IP connection limits) comes from X-Forwarded-For only
+        # when the request arrives through one of these proxies
+        proxy_headers=True,
+        forwarded_allow_ips=settings.forwarded_allow_ips,
         log_config=None,
     )
     _server_class()(config, app, settings.drain_timeout_s).run()

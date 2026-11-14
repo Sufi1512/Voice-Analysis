@@ -128,9 +128,11 @@ def month_start(now: datetime | None = None) -> datetime:
 
 
 def used_seconds(db: Session, org_id: str, since: datetime) -> float:
+    """Audio of calls that ended since ``since``: counted when a call ends, as billing does
+    (E9), so the usage pages, the quota and the invoice agree."""
     total = db.scalar(
         select(func.coalesce(func.sum(SessionRecord.audio_seconds), 0.0)).where(
-            SessionRecord.org_id == org_id, SessionRecord.started_at >= since
+            SessionRecord.org_id == org_id, SessionRecord.ended_at >= since
         )
     )
     return float(total or 0.0)
@@ -143,16 +145,19 @@ def quota_remaining_s(db: Session, org: Organization) -> float | None:
 
 
 def usage_by_day(db: Session, org_id: str, start: datetime, end: datetime) -> list[dict[str, Any]]:
+    """Audio minutes and calls per UTC day, by the day each call ended."""
     rows = db.execute(
-        select(SessionRecord.started_at, SessionRecord.audio_seconds).where(
+        select(SessionRecord.ended_at, SessionRecord.audio_seconds).where(
             SessionRecord.org_id == org_id,
-            SessionRecord.started_at >= start,
-            SessionRecord.started_at < end,
+            SessionRecord.ended_at >= start,
+            SessionRecord.ended_at < end,
         )
     ).all()
     days: dict[str, list[float]] = {}
-    for started, secs in rows:
-        d = _aware(started).date().isoformat()
+    for ended, secs in rows:
+        if ended is None:  # excluded by the query; for the type checker
+            continue
+        d = _aware(ended).date().isoformat()
         days.setdefault(d, [0.0, 0.0])
         days[d][0] += secs
         days[d][1] += 1
@@ -160,3 +165,43 @@ def usage_by_day(db: Session, org_id: str, start: datetime, end: datetime) -> li
         {"date": d, "audio_minutes": round(v[0] / 60.0, 3), "sessions": int(v[1])}
         for d, v in sorted(days.items())
     ]
+
+
+def active_sessions(db: Session, org_id: str) -> int:
+    """Calls running now for the organization, on every server (lost ones are swept)."""
+    return int(
+        db.scalar(
+            select(func.count())
+            .select_from(SessionRecord)
+            .where(SessionRecord.org_id == org_id, SessionRecord.status == "active")
+        )
+        or 0
+    )
+
+
+LOST_REASON = "lost: no heartbeat from the server running the call"
+
+
+def sweep_stale_sessions(db: Session, stale_after_s: float, now: datetime | None = None) -> int:
+    """Close calls whose server stopped without ending them (killed, crashed, node lost).
+
+    They end at their last heartbeat with the audio seconds saved then, so billing counts
+    them (late, in the next report). Several servers may sweep at once: the update only
+    touches sessions that are still active and stale.
+    """
+    cutoff = (now or utcnow()) - timedelta(seconds=stale_after_s)
+    last_seen = func.coalesce(SessionRecord.heartbeat_at, SessionRecord.started_at)
+    stale = list(
+        db.scalars(
+            select(SessionRecord)
+            .where(SessionRecord.status == "active", last_seen < cutoff)
+            .with_for_update(skip_locked=True)
+            .limit(500)
+        )
+    )
+    for rec in stale:
+        rec.status = "failed"
+        rec.close_code = 1011
+        rec.close_reason = LOST_REASON
+        rec.ended_at = rec.heartbeat_at or rec.started_at
+    return len(stale)

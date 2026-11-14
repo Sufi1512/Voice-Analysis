@@ -21,9 +21,16 @@ remaining phases in order. Acceptance: invoice usage matches recorded audio seco
 - Stripe side (one-off setup): a billing meter with event name `nexora_audio_seconds`,
   aggregation `sum`, and a metered price on it (per minute: `transform_quantity[divide_by]=60`).
 
-Note: the dashboard's usage pages count a call on the day it **started**; billing counts it in
-the hour it **ended** (only then are its seconds final). Totals agree; a call crossing
-midnight shows on different days.
+Usage pages, the monthly quota and billing all count a call when it **ends** (only then are its
+seconds final), so a call crossing midnight shows on the day it ended everywhere (I-029, fixed
+2026-11-14). The session export lists calls by start time.
+
+Lost calls (I-030, fixed 2026-11-14): every running call saves its audio seconds and a
+heartbeat every `NEXORA_CHECKPOINT_INTERVAL_S` (30 s). If the server running it dies, a
+sweeper on every server closes it after `NEXORA_STALE_SESSION_AFTER_S` (120 s) as `failed`,
+ending at its last heartbeat with the seconds saved then. Reports are running totals, so a
+call back-dated into an hour that was already reported is billed in the next report
+(`nexora_sessions_swept_total` counts them).
 
 ## 2. Single sign-on for the dashboard (OpenID Connect) - `sso.py`
 

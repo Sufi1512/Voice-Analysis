@@ -13,6 +13,7 @@ resources:
   - ingress.yaml
   - hpa.yaml
   - pdb.yaml
+  - networkpolicy.yaml
   - redis.yaml  # single-node, non-production; use a managed Redis in production
 images:
   - name: nexora-server

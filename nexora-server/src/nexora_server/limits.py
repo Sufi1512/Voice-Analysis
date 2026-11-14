@@ -157,3 +157,42 @@ class RedisOrgLimiter:
         t = await self.client.time()
         now = int(t[0]) * 1000 + int(t[1]) // 1000
         return int(await self.client.zcount(self.key(org_id), now, "+inf"))
+
+
+class ConnectRateLimiter:
+    """Token bucket of new connections per client IP, on this instance.
+
+    Checked before a WebSocket is accepted, so a flood from one address is refused without
+    a handshake, database lookup or key check. Large floods from many addresses belong to
+    the load balancer / WAF (deploy/k8s/ingress.yaml limits per IP too).
+    """
+
+    def __init__(self, rate_per_s: float, burst: int, max_clients: int = 100_000) -> None:
+        self.rate = rate_per_s
+        self.burst = float(burst)
+        self.max_clients = max_clients
+        self._buckets: dict[str, tuple[float, float]] = {}  # ip -> (tokens, last time)
+        self._lock = threading.Lock()
+
+    def allow(self, client: str, now: float | None = None) -> bool:
+        if self.rate <= 0:
+            return True
+        import time
+
+        now = time.monotonic() if now is None else now
+        with self._lock:
+            tokens, last = self._buckets.pop(client, (self.burst, now))
+            tokens = min(self.burst, tokens + (now - last) * self.rate)
+            ok = tokens >= 1.0
+            if ok:
+                tokens -= 1.0
+            self._buckets[client] = (tokens, now)  # re-inserted: dict order = recency
+            if len(self._buckets) > self.max_clients:  # forget the longest-idle addresses
+                for ip in list(self._buckets)[: len(self._buckets) - self.max_clients]:
+                    del self._buckets[ip]
+            return ok
+
+    def retry_after_s(self, client: str) -> int:
+        with self._lock:
+            tokens, _ = self._buckets.get(client, (self.burst, 0.0))
+        return max(1, int((1.0 - tokens) / self.rate + 0.999)) if self.rate > 0 else 1

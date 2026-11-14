@@ -7,7 +7,7 @@ import os
 import secrets
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 log = logging.getLogger("nexora.settings")
 
@@ -41,6 +41,22 @@ class Settings(BaseModel):
     drain_timeout_s: float = Field(
         600.0, ge=0, description="On SIGTERM, wait this long for open sessions to finish."
     )
+    checkpoint_interval_s: float = Field(
+        30.0, gt=0, description="Save each running call's audio seconds and heartbeat this often."
+    )
+    stale_session_after_s: float = Field(
+        120.0,
+        gt=0,
+        description="A call with no heartbeat for this long is closed as lost (server died).",
+    )
+    # new WebSocket connections per client IP (token bucket); 0 turns the limit off
+    connect_rate_per_ip: float = Field(20.0, ge=0, description="Sustained connections/s per IP.")
+    connect_burst_per_ip: int = Field(100, ge=1, description="Connections allowed in a burst.")
+    forwarded_allow_ips: str = Field(
+        "127.0.0.1",
+        description="Proxies whose X-Forwarded-For is trusted for the client IP ('*': all; "
+        "only when nothing but the load balancer can reach the server).",
+    )
     auto_migrate: bool = Field(
         True, description="Run database migrations at start-up (false with a migration Job)."
     )
@@ -60,6 +76,12 @@ class Settings(BaseModel):
     billing_interval_s: float = Field(300.0, ge=10)
     log_level: str = "INFO"
     cors_origins: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _stale_after_checkpoints(self) -> Settings:
+        if self.stale_session_after_s < 2 * self.checkpoint_interval_s:
+            raise ValueError("stale_session_after_s must be at least 2x checkpoint_interval_s")
+        return self
 
     @classmethod
     def from_env(cls, **overrides: object) -> Settings:

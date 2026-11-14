@@ -139,6 +139,7 @@ class UsageOut(BaseModel):
     sessions: int
     monthly_minutes_quota: int | None
     month_to_date_minutes: float
+    active_sessions: int = 0  # calls running now, on every server
     days: list[dict[str, Any]]
 
 

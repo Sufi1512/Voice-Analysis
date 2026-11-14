@@ -48,6 +48,7 @@ import jwt
 from fastapi import APIRouter, WebSocket
 from nexora_audio import AudioFormat, AudioFormatError, StreamSession
 from starlette.concurrency import run_in_threadpool
+from starlette.responses import JSONResponse
 from starlette.websockets import WebSocketDisconnect, WebSocketState
 
 from nexora_server.db import Database, Organization, SessionRecord, utcnow
@@ -211,6 +212,13 @@ async def _serve(ws: WebSocket, mode: str) -> None:
     db: Database = app.state.db
     mgr: SessionManager = app.state.manager
     metrics: Metrics = app.state.metrics
+    # flood control before the handshake is even accepted (HTTP 429, no upgrade)
+    limiter = app.state.connect_limiter
+    client = ws.client.host if ws.client else "unknown"
+    if not limiter.allow(client):
+        metrics.rejections.labels("rate_limited").inc()
+        await _deny(ws, limiter.retry_after_s(client))
+        return
     await ws.accept()
     # cheap refusal first: a full, overloaded or draining instance turns callers away
     # before spending a database lookup and key check on them (retry storms, floods)
@@ -257,6 +265,7 @@ async def _serve(ws: WebSocket, mode: str) -> None:
     record_id: str | None = None
     session: StreamSession | None = None
     run: _Run | None = None
+    checkpoints: asyncio.Task[None] | None = None
     healthy = True
     metrics.active.labels(mode).inc()
     try:
@@ -265,6 +274,9 @@ async def _serve(ws: WebSocket, mode: str) -> None:
         metrics.session_start_seconds.observe(time.perf_counter() - t0)
         run = _Run(ctx, session)
         record_id = await run_in_threadpool(_create_record, db, ctx, session)
+        checkpoints = asyncio.get_running_loop().create_task(
+            _checkpoint_loop(db, record_id, run, settings.checkpoint_interval_s, metrics)
+        )
         log.info(
             "session started",
             extra={
@@ -302,6 +314,8 @@ async def _serve(ws: WebSocket, mode: str) -> None:
         # shielded: if the connection task is cancelled (client gone), the cleanup still
         # runs to the end instead of stopping at its first await
         with anyio.CancelScope(shield=True):
+            if checkpoints is not None:
+                checkpoints.cancel()
             metrics.active.labels(mode).dec()
             await slot.close()
             if run is not None:
@@ -354,9 +368,44 @@ def _fmt_dict(f: AudioFormat) -> dict[str, Any]:
     return {"encoding": f.encoding, "sample_rate": f.sample_rate, "channels": f.channels}
 
 
+async def _deny(ws: WebSocket, retry_after_s: int) -> None:
+    """Refuse the WebSocket upgrade with HTTP 429 (or a plain close if the server cannot
+    send an HTTP response to a WebSocket request)."""
+    body = {"error": "too many connections from this address", "retry_after_s": retry_after_s}
+    try:
+        await ws.send_denial_response(
+            JSONResponse(body, status_code=429, headers={"Retry-After": str(retry_after_s)})
+        )
+    except RuntimeError:
+        await ws.close(code=1008)
+
+
+async def _checkpoint_loop(
+    db: Database, record_id: str, run: _Run, every_s: float, metrics: Metrics
+) -> None:
+    """Save the call's audio seconds and a heartbeat while it runs, so a call whose server
+    dies is still billed up to its last checkpoint (services.sweep_stale_sessions)."""
+    while True:
+        await asyncio.sleep(every_s)
+        try:
+            await run_in_threadpool(_checkpoint, db, record_id, run.audio_s)
+        except Exception:
+            log.warning("session checkpoint failed", extra={"session_id": record_id})
+            metrics.record_errors.inc()
+
+
+def _checkpoint(db: Database, record_id: str, audio_s: float) -> None:
+    with db.session() as s:
+        rec = s.get(SessionRecord, record_id)
+        if rec is not None and rec.status == "active":
+            rec.audio_seconds = audio_s
+            rec.heartbeat_at = utcnow()
+
+
 def _create_record(db: Database, ctx: StreamContext, session: StreamSession) -> str:
     with db.session() as s:
         rec = SessionRecord(
+            heartbeat_at=utcnow(),
             org_id=ctx.org.id,
             profile_id=ctx.profile_id,
             api_key_id=ctx.api_key_id,
@@ -381,7 +430,7 @@ def _finish_record(db: Database, record_id: str, run: _Run, healthy: bool) -> No
         rec.close_code = run.close_code
         rec.close_reason = run.close_reason
         rec.quality = run.quality
-        rec.ended_at = utcnow()
+        rec.ended_at = rec.heartbeat_at = utcnow()
 
 
 async def _receive(ws: WebSocket, settings: Settings) -> dict[str, Any] | None:

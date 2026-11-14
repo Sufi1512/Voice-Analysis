@@ -213,10 +213,10 @@ async function overview() {
       tile(fmtMin(used), "minutes this month"),
       tile(quota ? `${Math.round(pct)}%` : "none", quota ? `of ${quota.toLocaleString()} minute quota` : "monthly quota"),
       tile(String(usage.sessions), "sessions, last 30 days"),
-      tile(String(org.max_concurrent_sessions), "concurrent sessions allowed"),
+      tile(`${usage.active_sessions} / ${org.max_concurrent_sessions}`, "calls right now / allowed at once"),
     ),
     quota ? h("div", { class: "card" }, meter(pct), h("p", { class: "muted" }, `${fmtMin(used)} of ${quota} minutes used`)) : null,
-    h("div", { class: "card" }, h("h2", {}, "Audio minutes per day (last 30 days)"), usage.days.length ? barChart(fillDays(usage.days, new Date(usage.period_start), new Date(usage.period_end))) : h("p", { class: "muted" }, "No sessions yet.")),
+    h("div", { class: "card" }, h("h2", {}, "Audio minutes per day (last 30 days, by the day each call ended)"), usage.days.length ? barChart(fillDays(usage.days, new Date(usage.period_start), new Date(usage.period_end))) : h("p", { class: "muted" }, "No sessions yet.")),
     h("div", { class: "card" }, h("h2", {}, "Relay allowlist"), org.relay_allowlist.length ? h("ul", {}, org.relay_allowlist.map((x) => h("li", { class: "mono" }, x))) : h("p", { class: "muted" }, "Empty: Relay mode is off for this organization.")),
   );
 }

@@ -28,6 +28,11 @@ class Metrics:
             "Sessions whose end could not be written to the database (check logs to bill)",
             registry=r,
         )
+        self.swept = Counter(
+            "nexora_sessions_swept_total",
+            "Calls closed as lost because their server stopped sending heartbeats",
+            registry=r,
+        )
         self.limiter_errors = Counter(
             "nexora_limiter_errors_total",
             "Redis limiter calls that failed (fell back to this instance's count)",

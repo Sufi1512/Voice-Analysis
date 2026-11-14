@@ -82,3 +82,17 @@ def test_containers_run_locked_down() -> None:
             sc = c["securityContext"]
             assert sc["readOnlyRootFilesystem"] and not sc["allowPrivilegeEscalation"]
             assert "limits" in c["resources"]
+
+
+def test_trusting_all_proxies_needs_a_network_policy() -> None:
+    """With X-Forwarded-For trusted from anywhere, only the ingress may reach the pods, or
+    any pod in the cluster could fake its IP and dodge the per-IP connection limit."""
+    cfg = by_kind("ConfigMap")["data"]
+    if cfg.get("NEXORA_FORWARDED_ALLOW_IPS") != "*":
+        return
+    pol = by_kind("NetworkPolicy")
+    labels = by_kind("Deployment")["spec"]["template"]["metadata"]["labels"]
+    assert pol["spec"]["podSelector"]["matchLabels"].items() <= labels.items()
+    assert pol["spec"]["policyTypes"] == ["Ingress"]
+    sources = [s for rule in pol["spec"]["ingress"] for s in rule["from"]]
+    assert sources and all("namespaceSelector" in s for s in sources)

@@ -12,5 +12,9 @@ data:
   NEXORA_LEASE_TTL_S: "30"
   NEXORA_DRAIN_TIMEOUT_S: "600"    # keep below terminationGracePeriodSeconds (660)
   NEXORA_AUTO_MIGRATE: "false"     # the migration Job runs them, so replicas never race
+  # the client IP for per-IP connection limits comes from the ingress's X-Forwarded-For;
+  # safe because networkpolicy.yaml lets only the ingress (and Prometheus) reach the pods
+  NEXORA_FORWARDED_ALLOW_IPS: "*"
+  NEXORA_CONNECT_RATE_PER_IP: "20"  # new calls per second per caller IP (burst 100)
   NEXORA_LOG_LEVEL: INFO
   OMP_NUM_THREADS: "1"

@@ -37,6 +37,7 @@ from nexora_server.relay_policy import RelayTargetError, check_relay_target
 from nexora_server.security import Principal, mint_session_token
 from nexora_server.services import (
     ServiceError,
+    active_sessions,
     audit,
     create_key,
     create_org,
@@ -321,6 +322,7 @@ def get_usage(
         sessions=sum(d["sessions"] for d in days),
         monthly_minutes_quota=org.monthly_minutes_quota,
         month_to_date_minutes=round(used_seconds(db, oid, month_start()) / 60.0, 3),
+        active_sessions=active_sessions(db, oid),
         days=days,
     )
 

@@ -10,9 +10,14 @@ from sqlalchemy import create_engine, inspect
 
 log = logging.getLogger("nexora.migrate")
 FIRST_REVISION = "0001"
-# for databases made by create_all (no migration history): a table that only exists from
-# a given revision on tells which revision the database already matches
-MARKERS = [("usage_reports", "0002"), ("organizations", FIRST_REVISION)]
+# for databases made by create_all (no migration history): a table (or a table's column)
+# that only exists from a given revision on tells which revision the database matches.
+# Newest first.
+MARKERS: list[tuple[str, str | None, str]] = [
+    ("sessions", "heartbeat_at", "0003"),
+    ("usage_reports", None, "0002"),
+    ("organizations", None, FIRST_REVISION),
+]
 
 
 def config(url: str) -> Config:
@@ -28,14 +33,22 @@ def upgrade(url: str, revision: str = "head") -> None:
     cfg = config(url)
     engine = create_engine(url)
     try:
-        tables = set(inspect(engine).get_table_names())
+        insp = inspect(engine)
+        tables = set(insp.get_table_names())
+        found = next(
+            (
+                rev
+                for table, column, rev in MARKERS
+                if table in tables
+                and (column is None or column in {c["name"] for c in insp.get_columns(table)})
+            ),
+            None,
+        )
     finally:
         engine.dispose()
-    if "alembic_version" not in tables:
-        found = next((rev for table, rev in MARKERS if table in tables), None)
-        if found is not None:
-            log.info("existing database without migration history: stamping %s", found)
-            command.stamp(cfg, found)
+    if "alembic_version" not in tables and found is not None:
+        log.info("existing database without migration history: stamping %s", found)
+        command.stamp(cfg, found)
     command.upgrade(cfg, revision)
 
 

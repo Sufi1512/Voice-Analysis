@@ -19,7 +19,12 @@ from starlette.concurrency import run_in_threadpool
 from nexora_server.api.routes import router as api_router
 from nexora_server.dashboard import router as dashboard_router
 from nexora_server.db import Database
-from nexora_server.limits import LocalOrgLimiter, OrgLimiter, RedisOrgLimiter
+from nexora_server.limits import (
+    ConnectRateLimiter,
+    LocalOrgLimiter,
+    OrgLimiter,
+    RedisOrgLimiter,
+)
 from nexora_server.observability import Metrics, setup_logging
 from nexora_server.settings import Settings
 from nexora_server.sso import OidcProvider
@@ -45,6 +50,27 @@ async def _billing_loop(app: FastAPI) -> None:
         await asyncio.sleep(app.state.settings.billing_interval_s)
 
 
+async def _sweep_loop(app: FastAPI) -> None:
+    """Close calls whose server stopped sending heartbeats (killed, crashed, node lost)."""
+    from nexora_server.services import sweep_stale_sessions
+
+    settings: Settings = app.state.settings
+
+    def sweep() -> int:
+        with app.state.db.session() as db:
+            return sweep_stale_sessions(db, settings.stale_session_after_s)
+
+    while True:
+        await asyncio.sleep(settings.checkpoint_interval_s)
+        try:
+            n = await run_in_threadpool(sweep)
+            if n:
+                app.state.metrics.swept.inc(n)
+                log.warning("closed lost sessions", extra={"count": n})
+        except Exception:
+            log.exception("session sweep failed")
+
+
 def create_app(settings: Settings | None = None, *, prewarm: bool = True) -> FastAPI:
     settings = settings or Settings.from_env()
     setup_logging(settings.log_level)
@@ -55,6 +81,7 @@ def create_app(settings: Settings | None = None, *, prewarm: bool = True) -> Fas
             from nexora_server.migrate import upgrade
 
             await run_in_threadpool(upgrade, settings.database_url)
+        sweep_task = asyncio.create_task(_sweep_loop(app))
         billing_task = None
         if settings.stripe_api_key:
             billing_task = asyncio.create_task(_billing_loop(app))
@@ -65,6 +92,7 @@ def create_app(settings: Settings | None = None, *, prewarm: bool = True) -> Fas
             "ready", extra={"capacity": settings.max_sessions, "mode": settings.deployment_mode}
         )
         yield
+        sweep_task.cancel()
         if billing_task is not None:
             billing_task.cancel()
         app.state.ready = False
@@ -80,6 +108,9 @@ def create_app(settings: Settings | None = None, *, prewarm: bool = True) -> Fas
     app.state.settings = settings
     app.state.db = Database(settings.database_url)
     app.state.metrics = Metrics()
+    app.state.connect_limiter = ConnectRateLimiter(
+        settings.connect_rate_per_ip, settings.connect_burst_per_ip
+    )
     app.state.metrics.capacity.set(settings.max_sessions)
     limiter: OrgLimiter = LocalOrgLimiter()
     if settings.redis_url:

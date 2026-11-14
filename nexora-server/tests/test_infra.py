@@ -232,13 +232,28 @@ def _version(url: str) -> str:
 
 
 def test_create_all_databases_are_stamped_not_recreated(tmp_path: Path) -> None:
+    from sqlalchemy import text
+
     from nexora_server.db import Base, Database, SsoMember, UsageReport
     from nexora_server.migrate import upgrade
 
     current = f"sqlite:///{tmp_path / 'current.db'}"
     Database(current).create_all()
     upgrade(current)  # must not try to create the tables again
-    assert _version(current) == "0002"
+    assert _version(current) == "0003"
+
+    def before_0003(conn: object) -> None:
+        conn.execute(text("DROP INDEX ix_sessions_ended_at"))  # type: ignore[attr-defined]
+        conn.execute(text("ALTER TABLE sessions DROP COLUMN heartbeat_at"))  # type: ignore[attr-defined]
+
+    e9 = f"sqlite:///{tmp_path / 'e9.db'}"  # an E9-era database: no session heartbeat
+    Database(e9).create_all()
+    eng = create_engine(e9)
+    with eng.begin() as conn:
+        before_0003(conn)
+    eng.dispose()
+    upgrade(e9)
+    assert _version(e9) == "0003" and "heartbeat_at" in _columns(e9, "sessions")
 
     e1 = f"sqlite:///{tmp_path / 'e1.db'}"  # an E1-era database: only the first tables
     eng = create_engine(e1)
@@ -246,12 +261,21 @@ def test_create_all_databases_are_stamped_not_recreated(tmp_path: Path) -> None:
     first = [t for t in Base.metadata.sorted_tables if t.name not in skip]
     Base.metadata.create_all(eng, tables=first)
     with eng.begin() as conn:
-        from sqlalchemy import text
-
         conn.execute(text("ALTER TABLE organizations DROP COLUMN stripe_customer_id"))
+        before_0003(conn)
     eng.dispose()
     upgrade(e1)
-    assert _version(e1) == "0002" and {"usage_reports", "sso_members"} <= _tables(e1)
+    assert _version(e1) == "0003" and {"usage_reports", "sso_members"} <= _tables(e1)
+
+
+def _columns(url: str, table: str) -> set[str]:
+    from sqlalchemy import inspect
+
+    eng = create_engine(url)
+    try:
+        return {c["name"] for c in inspect(eng).get_columns(table)}
+    finally:
+        eng.dispose()
 
 
 def test_migrations_on_postgres() -> None:
