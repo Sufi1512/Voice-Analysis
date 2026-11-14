@@ -1,4 +1,4 @@
-# Local / single-host deployment: server + PostgreSQL + Prometheus.
+# Local / single-host deployment: server + PostgreSQL + Redis + Prometheus.
 #   cp deploy/.env.example deploy/.env   # then edit the secrets
 #   docker compose -f deploy/docker-compose.yml --env-file deploy/.env up --build
 services:
@@ -14,18 +14,25 @@ services:
       interval: 5s
       retries: 10
 
+  redis:  # organization limits across instances (session leases); no persistence needed
+    image: redis:7.4-alpine
+    command: ["--save", "", "--appendonly", "no"]
+
   nexora:
     build:
       context: ..
       dockerfile: deploy/server.Dockerfile
     depends_on:
       db: {condition: service_healthy}
+      redis: {condition: service_started}
     environment:
       NEXORA_DATABASE_URL: postgresql+psycopg://nexora:${POSTGRES_PASSWORD}@db:5432/nexora
       NEXORA_SECRET_KEY: ${NEXORA_SECRET_KEY:?set NEXORA_SECRET_KEY}
       NEXORA_ADMIN_API_KEY: ${NEXORA_ADMIN_API_KEY:?set NEXORA_ADMIN_API_KEY}
       NEXORA_DEPLOYMENT_MODE: ${NEXORA_DEPLOYMENT_MODE:-self_hosted}
       NEXORA_MAX_SESSIONS: ${NEXORA_MAX_SESSIONS:-}
+      NEXORA_REDIS_URL: redis://redis:6379/0
+    stop_grace_period: 11m  # SIGTERM drains open calls (NEXORA_DRAIN_TIMEOUT_S, 600 s)
     ports: ["8080:8080"]
     deploy:
       resources:

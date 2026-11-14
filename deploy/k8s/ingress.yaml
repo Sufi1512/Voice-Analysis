@@ -1,0 +1,24 @@
+# ingress-nginx; calls are long-lived WebSockets, so allow up to an hour without traffic gaps
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: nexora-server
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-body-size: 16m
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts: [voice.example.com]
+      secretName: nexora-tls
+  rules:
+    - host: voice.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: nexora-server
+                port: {name: http}

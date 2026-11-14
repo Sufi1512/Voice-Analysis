@@ -209,10 +209,10 @@ async def _serve(ws: WebSocket, mode: str) -> None:
         return
 
     try:
-        slot = mgr.slot(ctx.org.id, ctx.org.max_concurrent_sessions)
-        slot.__enter__()
+        slot = await mgr.open_slot(ctx.org.id, ctx.org.max_concurrent_sessions)
     except CapacityError as c:
-        metrics.rejections.labels("capacity" if c.code == 1013 else "org_limit").inc()
+        reason = "org_limit" if c.code == 4429 else "draining" if mgr.draining else "capacity"
+        metrics.rejections.labels(reason).inc()
         await _send_json(ws, {"type": "error", "code": c.code, "message": c.reason})
         await _close(ws, c.code, c.reason)
         return
@@ -261,7 +261,7 @@ async def _serve(ws: WebSocket, mode: str) -> None:
         await _send_json(ws, {"type": "error", "code": 1011, "message": "internal error"})
     finally:
         metrics.active.labels(mode).dec()
-        slot.__exit__(None, None, None)
+        await slot.close()
         if run is not None:
             metrics.audio_seconds.labels(mode).inc(run.audio_s)
             outcome = "ok" if run.close_code in (1000, 1001) else "error"

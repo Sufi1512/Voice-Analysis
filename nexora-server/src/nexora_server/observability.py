@@ -19,6 +19,12 @@ class Metrics:
             "nexora_active_sessions", "Open streaming sessions", ["mode"], registry=r
         )
         self.capacity = Gauge("nexora_capacity_sessions", "Configured session capacity", registry=r)
+        self.draining = Gauge("nexora_draining", "1 while the instance drains", registry=r)
+        self.limiter_errors = Counter(
+            "nexora_limiter_errors_total",
+            "Redis limiter calls that failed (fell back to this instance's count)",
+            registry=r,
+        )
         self.sessions = Counter(
             "nexora_sessions_total", "Sessions finished", ["mode", "outcome"], registry=r
         )

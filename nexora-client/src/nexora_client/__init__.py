@@ -82,6 +82,11 @@ class NexoraStream:
         """Process mode: tell Nexora your agent is playing audio (enables interruption events)."""
         await self._ws.send(json.dumps({"type": "agent_speaking", "value": speaking}))
 
+    async def send_transcript(self, text: str) -> None:
+        """Process mode: the caller's latest speech-to-text for the current turn. A turn whose
+        text ends on a word no sentence can end on ("...a flight to", "um") waits longer."""
+        await self._ws.send(json.dumps({"type": "transcript", "text": text}))
+
     async def flush(self) -> None:
         await self._ws.send(json.dumps({"type": "flush"}))
 
@@ -122,24 +127,39 @@ class NexoraStream:
         await self._ws.close()
 
 
+RETRY_CODES = frozenset({1013})  # server draining or at capacity: another instance will take it
+
+
 class _StreamContext:
-    def __init__(self, url: str, headers: dict[str, str]) -> None:
+    def __init__(
+        self, url: str, headers: dict[str, str], retries: int = 4, backoff_s: float = 0.25
+    ) -> None:
         self._url = url
         self._headers = headers
+        self._retries = retries
+        self._backoff_s = backoff_s
         self._stream: NexoraStream | None = None
 
     async def __aenter__(self) -> NexoraStream:
+        import asyncio
+
         import websockets
 
-        ws = await websockets.connect(
-            self._url, additional_headers=self._headers, max_size=16 * 1024 * 1024
-        )
-        first = json.loads(await ws.recv())
-        if first.get("type") == "error":
+        for attempt in range(self._retries + 1):
+            ws = await websockets.connect(
+                self._url, additional_headers=self._headers, max_size=16 * 1024 * 1024
+            )
+            first = json.loads(await ws.recv())
+            if first.get("type") != "error":
+                self._stream = NexoraStream(ws, first)
+                return self._stream
             await ws.close()
-            raise NexoraError(first.get("message", "rejected"), first.get("code"))
-        self._stream = NexoraStream(ws, first)
-        return self._stream
+            code = first.get("code")
+            if code not in RETRY_CODES or attempt == self._retries:
+                raise NexoraError(first.get("message", "rejected"), code)
+            # the load balancer sends the next attempt to another instance
+            await asyncio.sleep(self._backoff_s * 2**attempt)
+        raise AssertionError("unreachable")
 
     async def __aexit__(
         self, et: type[BaseException] | None, e: BaseException | None, tb: TracebackType | None
@@ -174,8 +194,12 @@ class NexoraClient:
         output_encoding: str | None = None,
         output_sample_rate: int | None = None,
         relay_target: str | None = None,
+        retries: int = 4,
     ) -> _StreamContext:
-        """Open a session. With ``relay_target`` it uses Relay mode, otherwise Process mode."""
+        """Open a session. With ``relay_target`` it uses Relay mode, otherwise Process mode.
+
+        If the server answers 1013 (draining for a deploy, or full), the connection is retried
+        ``retries`` times with backoff (0.25, 0.5, 1, 2 s), reaching another instance."""
         q: dict[str, Any] = {"encoding": encoding, "sample_rate": sample_rate, "channels": channels}
         for k, v in (
             ("profile", profile),
@@ -187,7 +211,9 @@ class NexoraClient:
                 q[k] = v
         path = "/v1/relay" if relay_target else "/v1/stream"
         return _StreamContext(
-            f"{self.ws_base}{path}?{urlencode(q)}", {"Authorization": f"Bearer {self._key}"}
+            f"{self.ws_base}{path}?{urlencode(q)}",
+            {"Authorization": f"Bearer {self._key}"},
+            retries=retries,
         )
 
     async def create_session_token(

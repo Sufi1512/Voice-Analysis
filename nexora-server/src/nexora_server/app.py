@@ -16,6 +16,7 @@ from starlette.concurrency import run_in_threadpool
 
 from nexora_server.api.routes import router as api_router
 from nexora_server.db import Database
+from nexora_server.limits import LocalOrgLimiter, OrgLimiter, RedisOrgLimiter
 from nexora_server.observability import Metrics, setup_logging
 from nexora_server.settings import Settings
 from nexora_server.streaming.manager import SessionManager, SessionSpec
@@ -31,7 +32,10 @@ def create_app(settings: Settings | None = None, *, prewarm: bool = True) -> Fas
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-        app.state.db.create_all()
+        if settings.auto_migrate:
+            from nexora_server.migrate import upgrade
+
+            await run_in_threadpool(upgrade, settings.database_url)
         if prewarm:  # load models before taking traffic; readiness waits for this
             await run_in_threadpool(app.state.manager.prewarm, DEFAULT_SPEC)
         app.state.ready = True
@@ -53,7 +57,19 @@ def create_app(settings: Settings | None = None, *, prewarm: bool = True) -> Fas
     app.state.db = Database(settings.database_url)
     app.state.metrics = Metrics()
     app.state.metrics.capacity.set(settings.max_sessions)
-    app.state.manager = SessionManager(settings.max_sessions, settings.worker_threads)
+    limiter: OrgLimiter = LocalOrgLimiter()
+    if settings.redis_url:
+        limiter = RedisOrgLimiter.from_url(
+            settings.redis_url,
+            ttl_s=settings.lease_ttl_s,
+            on_error=app.state.metrics.limiter_errors.inc,
+        )
+    app.state.manager = SessionManager(
+        settings.max_sessions,
+        settings.worker_threads,
+        limiter=limiter,
+        renew_every_s=settings.lease_ttl_s / 3,
+    )
     app.state.ready = False
 
     if settings.cors_origins:
@@ -81,11 +97,13 @@ def create_app(settings: Settings | None = None, *, prewarm: bool = True) -> Fas
             checks["database"] = False
         mgr: SessionManager = state.manager
         checks["has_capacity"] = mgr.active < mgr.max_sessions
+        checks["not_draining"] = not mgr.draining
         ok = all(checks.values())
         body = {
             "status": "ready" if ok else "not ready",
             "checks": checks,
             "active_sessions": mgr.active,
+            "draining": mgr.draining,
             "capacity": mgr.max_sessions,
             "warm_sessions": mgr.idle_sessions(),
             "engine": {"nexora_audio": nexora_audio.__version__},
@@ -97,4 +115,11 @@ def create_app(settings: Settings | None = None, *, prewarm: bool = True) -> Fas
         data = generate_latest(request.app.state.metrics.registry)
         return Response(data, media_type=CONTENT_TYPE_LATEST)
 
+    def start_draining() -> None:
+        """Stop taking new sessions; open ones carry on (see ``__main__.DrainingServer``)."""
+        app.state.manager.draining = True
+        app.state.metrics.draining.set(1)
+        log.info("draining", extra={"active_sessions": app.state.manager.active})
+
+    app.state.start_draining = start_draining
     return app

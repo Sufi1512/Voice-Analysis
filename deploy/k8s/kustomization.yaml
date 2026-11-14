@@ -1,0 +1,19 @@
+# Nexora Voice Cloud on Kubernetes. Create the secret first (see secret.example.yaml), then:
+#   kubectl apply -k deploy/k8s
+# Set your image with:  kustomize edit set image nexora-server=<registry>/nexora-server:<tag>
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: nexora
+resources:
+  - namespace.yaml
+  - configmap.yaml
+  - migrate-job.yaml
+  - deployment.yaml
+  - service.yaml
+  - ingress.yaml
+  - hpa.yaml
+  - pdb.yaml
+  - redis.yaml  # single-node, non-production; use a managed Redis in production
+images:
+  - name: nexora-server
+    newTag: latest

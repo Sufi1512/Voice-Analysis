@@ -7,13 +7,13 @@ import json
 import logging
 import threading
 from collections import defaultdict
-from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Any
 
 from nexora_audio import AudioFormat, StreamSession, TurnConfig
+
+from nexora_server.limits import LocalOrgLimiter, OrgLimiter
 
 log = logging.getLogger("nexora.manager")
 
@@ -72,20 +72,59 @@ class _Pool:
     idle: list[StreamSession] = field(default_factory=list)
 
 
+class Lease:
+    """One open session's slot: on this instance and in the organization's limit."""
+
+    def __init__(self, mgr: SessionManager, org_id: str, lease: str) -> None:
+        self.mgr, self.org_id, self.lease = mgr, org_id, lease
+        self._closed = False
+        self._task: asyncio.Task[None] | None = None
+        if mgr.renew_every_s > 0:
+            self._task = asyncio.get_running_loop().create_task(self._renew_loop())
+
+    async def _renew_loop(self) -> None:
+        while True:
+            await asyncio.sleep(self.mgr.renew_every_s)
+            await self.mgr.limiter.renew(self.org_id, self.lease)
+
+    async def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        if self._task is not None:
+            self._task.cancel()
+        try:
+            await self.mgr.limiter.release(self.org_id, self.lease)
+        finally:
+            with self.mgr._lock:
+                self.mgr._active -= 1
+
+
 class SessionManager:
     """Owns the worker threads, enforces capacity, and keeps warm sessions ready.
 
     Creating a session loads models (0.1-0.8 s), so recently used session types are kept
     in a small pool. Returned sessions are reset in the background before reuse.
+    Instance capacity is counted here; organization limits go through ``limiter`` (local,
+    or cluster-wide with Redis). While ``draining``, new sessions are refused.
     """
 
-    def __init__(self, max_sessions: int, worker_threads: int, pool_size: int = 2) -> None:
+    def __init__(
+        self,
+        max_sessions: int,
+        worker_threads: int,
+        pool_size: int = 2,
+        limiter: OrgLimiter | None = None,
+        renew_every_s: float = 10.0,
+    ) -> None:
         self.max_sessions = max_sessions
         self.pool_size = pool_size
         self.executor = ThreadPoolExecutor(worker_threads, thread_name_prefix="nexora-audio")
+        self.limiter: OrgLimiter = limiter or LocalOrgLimiter()
+        self.renew_every_s = renew_every_s
+        self.draining = False
         self._lock = threading.Lock()
         self._active = 0
-        self._per_org: dict[str, int] = defaultdict(int)
         self._pools: dict[SessionSpec, _Pool] = defaultdict(_Pool)
 
     # -- capacity --------------------------------------------------------------------
@@ -95,25 +134,27 @@ class SessionManager:
         return self._active
 
     def active_for(self, org_id: str) -> int:
-        return self._per_org.get(org_id, 0)
+        return self.limiter.active_for(org_id)
 
-    @contextmanager
-    def slot(self, org_id: str, org_limit: int) -> Iterator[None]:
+    async def open_slot(self, org_id: str, org_limit: int) -> Lease:
+        """Take a slot for a new session, or raise ``CapacityError``."""
         with self._lock:
+            if self.draining:
+                raise CapacityError(1013, "server draining, retry another instance")
             if self._active >= self.max_sessions:
                 raise CapacityError(1013, "server at capacity, retry another instance")
-            if self._per_org[org_id] >= org_limit:
-                raise CapacityError(4429, f"organization limit of {org_limit} concurrent sessions")
             self._active += 1
-            self._per_org[org_id] += 1
         try:
-            yield
-        finally:
+            lease = await self.limiter.acquire(org_id, org_limit)
+        except BaseException:
             with self._lock:
                 self._active -= 1
-                self._per_org[org_id] -= 1
-                if self._per_org[org_id] <= 0:
-                    del self._per_org[org_id]
+            raise
+        if lease is None:
+            with self._lock:
+                self._active -= 1
+            raise CapacityError(4429, f"organization limit of {org_limit} concurrent sessions")
+        return Lease(self, org_id, lease)
 
     # -- session pool ----------------------------------------------------------------
 

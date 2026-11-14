@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nexora-config
+  labels:
+    app.kubernetes.io/name: nexora-server
+data:
+  NEXORA_DEPLOYMENT_MODE: saas
+  NEXORA_MAX_SESSIONS: "16"        # per pod; matches 4 CPUs (see docs/benchmarks)
+  NEXORA_WORKER_THREADS: "4"
+  NEXORA_REDIS_URL: redis://nexora-redis:6379/0
+  NEXORA_LEASE_TTL_S: "30"
+  NEXORA_DRAIN_TIMEOUT_S: "600"    # keep below terminationGracePeriodSeconds (660)
+  NEXORA_AUTO_MIGRATE: "false"     # the migration Job runs them, so replicas never race
+  NEXORA_LOG_LEVEL: INFO
+  OMP_NUM_THREADS: "1"

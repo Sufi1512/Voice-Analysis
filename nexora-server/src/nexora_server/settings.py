@@ -32,6 +32,16 @@ class Settings(BaseModel):
     idle_timeout_s: float = Field(30.0, gt=0)
     quota_check_interval_s: float = Field(60.0, gt=0)
     agent_silence_ms: float = Field(300.0, gt=0)
+    redis_url: str = Field(
+        default="", description="Redis for cluster-wide organization limits (empty: per instance)."
+    )
+    lease_ttl_s: float = Field(30.0, ge=3, description="Session lease lifetime in Redis.")
+    drain_timeout_s: float = Field(
+        600.0, ge=0, description="On SIGTERM, wait this long for open sessions to finish."
+    )
+    auto_migrate: bool = Field(
+        True, description="Run database migrations at start-up (false with a migration Job)."
+    )
     log_level: str = "INFO"
     cors_origins: list[str] = Field(default_factory=list)
 
@@ -47,6 +57,8 @@ class Settings(BaseModel):
                 data[name] = int(raw)
             elif ann is float:
                 data[name] = float(raw)
+            elif ann is bool:
+                data[name] = raw.strip().lower() in ("1", "true", "yes", "on")
             elif name == "cors_origins":
                 data[name] = [o.strip() for o in raw.split(",") if o.strip()]
             else:
