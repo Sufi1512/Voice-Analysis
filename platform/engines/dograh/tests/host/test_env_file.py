@@ -3,7 +3,7 @@
 import re
 from pathlib import Path
 
-ENV_FILE = Path(__file__).resolve().parents[2] / ".env.nexora"
+ENV_FILE = Path(__file__).resolve().parents[2] / "nexora.env"
 
 
 def entries() -> dict[str, str]:
@@ -26,3 +26,12 @@ def test_env_nexora_has_no_secrets():
 def test_env_nexora_sets_telemetry_off_and_oss():
     assert entries()["ENABLE_TELEMETRY"] == "false"
     assert entries()["DEPLOYMENT_MODE"] == "oss"
+
+
+def test_env_file_is_tracked_by_git():
+    """Regression: the root .gitignore drops `.env.*` files, so a dot-env name never reached CI."""
+    import subprocess
+
+    tracked = subprocess.run(["git", "ls-files", "--error-unmatch", ENV_FILE.name], cwd=ENV_FILE.parent,
+                             capture_output=True, text=True)
+    assert tracked.returncode == 0, f"{ENV_FILE.name} is not committed (ignored by .gitignore?)"

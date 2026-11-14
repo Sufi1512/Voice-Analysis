@@ -9,7 +9,7 @@ From `P0_SPEC.md` and `P0_IMPLEMENTATION_DECISIONS.md` (AC-1 to AC-9). Branch `p
 | T3 | `setup.sh`: Dograh API environment with the nexora-audio wheel; Dograh's own tests pass | T2 | M |
 | T4 | nexora engine contract tests | T3 | M |
 | T5 | Exit test: a Dograh call pipeline with nexora-audio | T4 | M |
-| T6 | Telemetry off with `.env.nexora` | T3 | S |
+| T6 | Telemetry off with `nexora.env` | T3 | S |
 | T7 | CI workflow `platform.yml` with test job and image build | T5, T6 | M |
 | T8 | P1 and Workflow Runner specs, LangGenius enquiry draft | T7 | M |
 
@@ -111,11 +111,11 @@ Spec: P0_SPEC §4.3; AC-6
 
 **Notes**: use Dograh's `api/tests/pipecat_test_utils.py` helpers where they fit; if Dograh's engine wiring needs a database, build the transport and pipeline with Dograh's factory and Pipecat's pipeline runner directly and say so in the test docstring.
 
-### T6: Telemetry off with `.env.nexora`
+### T6: Telemetry off with `nexora.env`
 Depends on: T3
 Spec: P0_SPEC §2; AC-7
 
-**What**: `platform/engines/dograh/.env.nexora` with `ENABLE_TELEMETRY=false`, `DEPLOYMENT_MODE=oss`, no PostHog key; a test loads Dograh's `api.constants` under it.
+**What**: `platform/engines/dograh/nexora.env` with `ENABLE_TELEMETRY=false`, `DEPLOYMENT_MODE=oss`, no PostHog key; a test loads Dograh's `api.constants` under it.
 
 **Acceptance criteria**
 - [ ] AC-7, and Dograh's app-level telemetry switch evaluates to off.

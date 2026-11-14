@@ -57,7 +57,7 @@ jobs:
         run: |
           mkdir -p "$RUNNER_TEMP/ctx"
           (cd nexora-audio && uv build --wheel -o "$RUNNER_TEMP/ctx")
-          cp platform/engines/dograh/.env.nexora "$RUNNER_TEMP/ctx/"
+          cp platform/engines/dograh/nexora.env "$RUNNER_TEMP/ctx/"
           docker build -f platform/engines/dograh/Dockerfile.nexora --build-arg BASE=dograh-api:nexora-base \
             -t dograh-api:nexora "$RUNNER_TEMP/ctx"
       - name: Smoke check inside the image

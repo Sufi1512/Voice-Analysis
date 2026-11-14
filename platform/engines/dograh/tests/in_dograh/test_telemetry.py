@@ -3,7 +3,7 @@
 Dograh has two telemetry paths: PostHog (``api.services.posthog_client``, needs
 ``POSTHOG_API_KEY``) and Sentry (``api.app``, enabled in OSS mode only when
 ``ENABLE_TELEMETRY`` is true). Each check runs in a fresh interpreter whose environment
-holds only ``.env.nexora`` and the dummy service URLs, so nothing leaks in from the host.
+holds only ``nexora.env`` and the dummy service URLs, so nothing leaks in from the host.
 """
 
 import os

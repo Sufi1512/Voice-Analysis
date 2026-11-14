@@ -29,8 +29,13 @@ def test_engine_lock_pins_audited_commits():
 
 
 def test_patch_matches_integration_copy():
+    """While the old copy in integrations/dograh exists, the two must not drift apart."""
+    import pytest
+
     ours = ENGINE_DIR / "patches" / "0001-nexora-noise-engine.patch"
     theirs = REPO / "integrations" / "dograh" / "0001-nexora-noise-engine.patch"
+    if not theirs.exists():
+        pytest.skip("old copy removed; platform/engines/dograh/patches is the only one")
     assert ours.read_bytes() == theirs.read_bytes()
 
 

@@ -14,7 +14,7 @@ tickets: `../../docs/P0_TICKETS.md`.
 | `fetch.sh <dir>` | Clones both at the pinned commits and applies `patches/`; fails if a patch no longer applies |
 | `setup.sh <dograh-dir> <venv> <wheel>` | Python 3.13 venv with Dograh's API requirements, the pinned Pipecat fork and the nexora-audio wheel (no `[pipecat]` extra) |
 | `run-tests.sh <dograh-dir> <venv>` | Dograh's own noise-reduction and workflow-configuration tests, then NEXORA's tests in `tests/` |
-| `.env.nexora` | NEXORA's Dograh settings: telemetry off, OSS mode, no PostHog key |
+| `nexora.env` | NEXORA's Dograh settings: telemetry off, OSS mode, no PostHog key |
 | `patches/0001-nexora-noise-engine.patch` | Adds the `nexora` noise engine (nexora-audio) next to RNNoise |
 | `tests/` | NEXORA's tests, run against the patched Dograh |
 

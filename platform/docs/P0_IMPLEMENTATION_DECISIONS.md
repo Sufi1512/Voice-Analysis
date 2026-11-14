@@ -13,7 +13,7 @@ Prove that NEXORA can change Dograh without forking it: a Dograh call pipeline r
 
 ## Scope
 ### In scope
-- `platform/engines/dograh/`: `ENGINE.lock`, `fetch.sh`, `patches/`, `tests/`, `.env.nexora`, README.
+- `platform/engines/dograh/`: `ENGINE.lock`, `fetch.sh`, `patches/`, `tests/`, `nexora.env`, README.
 - Empty `platform/services/`, `apps/`, `packages/`, `sdks/` with a README each.
 - Tests 1–4 from P0_SPEC §4.
 - `.github/workflows/platform.yml`: test job and Dograh API image build job.
@@ -35,6 +35,8 @@ Prove that NEXORA can change Dograh without forking it: a Dograh call pipeline r
 | D6 | Pipecat is installed editable from the pinned checkout with **the same extras as Dograh's Dockerfile and `scripts/setup_requirements.sh`**, plus Pipecat's dev group for test tools | Dograh's API modules import many provider services at import time, so a trimmed extra set would test a configuration Dograh never runs. Install is quick with uv's cache (P0_SPEC risk 3 handled by caching, not by trimming) |
 | D7 | Work on branch `platform/p0-foundations` with its own pull request; never push to `main` directly | Another session works in the same repository |
 | D8 | NEXORA's own tests live in `platform/engines/dograh/tests/` and are copied into the Dograh checkout's `api/tests/nexora/` at test time | They use Dograh's imports and fixtures without changing Dograh's test files beyond the patch |
+| D9 | The exit test enters through Dograh's Twilio `create_transport` with a fake Twilio WebSocket (real-time 8 kHz mu-law media events), not `api/tests/pipecat_test_utils.py` | Pipecat's mock input transport skips `audio_in_filter`, so it cannot prove the filter runs. Dograh's real call entry point covers the serializer, `build_audio_in_filter` and the input transport; only the credential lookup and the Twilio REST hangup are stubbed |
+| D10 | NEXORA's Dograh settings file is `nexora.env`, not `.env.nexora` | The repository's root `.gitignore` drops `.env.*` (correctly, for secrets), so the dot name never reached CI. A test checks the file is committed and holds no secrets |
 
 ## Acceptance criteria
 - [ ] **AC-1** Given `ENGINE.lock`, when `fetch.sh <dir>` runs, then Dograh is checked out at `d672de2947da691fbc4542b62b914547a80e01ab` and Pipecat at `9ac08e90be4bb83e506f3d10deaa8e6d31588547`, and every patch in `patches/` is applied.
@@ -43,7 +45,7 @@ Prove that NEXORA can change Dograh without forking it: a Dograh call pipeline r
 - [ ] **AC-4** Given the factory configured with `{enabled: true, engine: "nexora"}`, then it returns a `SafeAudioFilter` wrapping `NexoraAudioFilter`, and a new instance per call.
 - [ ] **AC-5** Given the nexora engine, then at 8 and 16 kHz with 20 ms chunks: output keeps pace with input (only the processing delay missing); stationary noise drops by at least 10 dB; clean speech keeps its level within 3 dB; a disable frame passes audio through unchanged; any chunk size works; audio before `start` and after `stop` passes through; the 95th-percentile per-frame time stays under `SafeAudioFilter`'s 10 ms budget and the filter is never switched off.
 - [ ] **AC-6 (exit test)** Given a Dograh call pipeline with a test transport, stubbed STT and LLM, and the agent's `noise_reduction` set to `{enabled: true, engine: "nexora"}`, when noisy speech is sent in, then the audio reaching STT is nexora-audio's output (noise reduced by at least 10 dB, speech kept), `SafeAudioFilter` never tripped, and the call ends normally.
-- [ ] **AC-7** Given `.env.nexora`, when Dograh's API settings load, then `ENABLE_TELEMETRY` is false and no PostHog key is set.
+- [ ] **AC-7** Given `nexora.env`, when Dograh's API settings load, then `ENABLE_TELEMETRY` is false and no PostHog key is set.
 - [ ] **AC-8** Given a change under `platform/**` or `nexora-audio/**`, when CI runs `platform.yml` on `ubuntu-latest`, then the wheel builds, `fetch.sh` succeeds, AC-3 to AC-7 pass, and the patched Dograh API Docker image builds.
 - [ ] **AC-9** `platform/services/`, `apps/`, `packages/`, `sdks/` exist with READMEs saying what goes there and from which phase.
 

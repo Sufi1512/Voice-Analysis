@@ -13,7 +13,7 @@ FROM ${BASE}
 
 USER root
 COPY nexora_audio-*.whl /tmp/wheels/
-COPY .env.nexora /app/.env.nexora
+COPY nexora.env /app/nexora.env
 # Plain install: Pipecat is only in the [pipecat] extra, so it is not pulled in.
 RUN /opt/venv/bin/python -m pip install --no-cache-dir /tmp/wheels/nexora_audio-*.whl \
  && rm -rf /tmp/wheels
