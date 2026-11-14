@@ -51,7 +51,10 @@ From the `pipecat-ai` 1.16.0 wheel on PyPI (`pipecat/audio/turn/smart_turn/data/
 has Apache-2.0 Hugging Face portions). Model sha256
 `2bb026316b14a660486a75b1733cd3fbab8c2fd0314dc9af7be49f8cca967e4f`, both unchanged.
 
-Other platforms (macOS, Windows, Linux aarch64) are not bundled yet. Point
+Linux aarch64, macOS x86_64 and macOS arm64 libraries are built in CI from the same pinned
+sources by `native/build_native.sh` (each wheel carries its platform's `BUILD_INFO.txt`); see
+`docs/E7_SPEC.md`. macOS arm64 currently ships without libdf (OPEN_ISSUES I-031). Windows is
+not built yet. Point
 `NEXORA_DEEPFILTER_LIBRARY` at a libdf built with the command above, and/or
 `NEXORA_RNNOISE_LIBRARY` at a librnnoise built from the same RNNoise release (or install
 the system package `librnnoise0` on Debian/Ubuntu).
